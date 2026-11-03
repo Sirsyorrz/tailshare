@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>tailshare</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="app.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <span class="brand">tailshare</span>
+        <nav id="crumbs" class="crumbs"></nav>
+        <span class="spacer"></span>
+        <button id="btn-mkdir" hidden>New folder</button>
+        <button id="btn-upload" hidden>Upload</button>
+        <input id="file-input" type="file" multiple hidden />
+      </header>
+      <aside class="sidebar">
+        <div class="sidebar-h">Shares</div>
+        <ul id="shares" class="share-list"></ul>
+        <div class="sidebar-h">Transfers</div>
+        <ul id="transfers" class="transfer-list"></ul>
+      </aside>
+      <main id="main" class="main">
+        <div id="empty" class="empty dim"></div>
+        <table id="files" class="files" hidden>
+          <thead>
+            <tr><th>Name</th><th class="num">Size</th><th class="num">Modified</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div id="dropzone" class="dropzone" hidden>Drop files to upload</div>
+      </main>
+      <footer class="statusbar">
+        <span id="status-msg"></span>
+        <span class="spacer"></span>
+        <span id="whoami" class="dim"></span>
+      </footer>
+    </div>
+    <div id="modal-back" class="modal-back" hidden>
+      <form id="modal" class="modal">
+        <div id="modal-title" class="modal-title"></div>
+        <div id="modal-text" class="dim"></div>
+        <input id="modal-input" autocomplete="off" spellcheck="false" />
+        <div class="modal-actions">
+          <button type="button" id="modal-alt" hidden></button>
+          <button type="button" id="modal-cancel">Cancel</button>
+          <button type="submit" id="modal-ok">OK</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>
