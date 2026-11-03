@@ -44,7 +44,7 @@ function Sidebar() {
       <div className="sidebar-h">This computer</div>
       <ul className="nav">
         <li className={selected.kind === "host" ? "active" : ""} onClick={() => select({ kind: "host" })}>
-          <span className={"dot " + host.phase} />
+          <span className={"dot " + (host.phase === "running" && host.warning ? "login" : host.phase)} />
           <span className="grow">Hosting</span>
           <span className="dim small">{host.phase === "running" ? host.hostname : ""}</span>
         </li>

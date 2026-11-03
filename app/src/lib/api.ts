@@ -125,7 +125,7 @@ export interface Browse {
   dirs: string[];
 }
 
-export type Phase = "stopped" | "starting" | "login" | "running" | "failed";
+export type Phase = "stopped" | "starting" | "login" | "approval" | "running" | "failed";
 export interface HostSnapshot {
   state: HostState;
   log: string[];
@@ -137,6 +137,8 @@ export interface HostState {
   phase: Phase;
   url?: string;
   loginUrl?: string;
+  notice?: string;
+  warning?: string;
   error?: string;
   hostname: string;
   stateDir: string;

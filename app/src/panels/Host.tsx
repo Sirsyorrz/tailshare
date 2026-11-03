@@ -58,7 +58,7 @@ export function Host() {
   const setOnLaunch = (v: boolean) => settings && void useStore.getState().saveSettings({ ...settings, hostOnLaunch: v });
 
   const running = host.phase === "running";
-  const active = host.phase === "starting" || host.phase === "login" || running;
+  const active = host.phase === "starting" || host.phase === "login" || host.phase === "approval" || running;
   const machinesURL = `https://login.tailscale.com/admin/machines?q=${encodeURIComponent(host.hostname || name)}`;
 
   return (
@@ -77,7 +77,8 @@ export function Host() {
               {
                 stopped: "Not hosting",
                 starting: "Starting\u2026",
-                login: "Waiting for sign-in",
+                login: host.notice ? "Signed out of Tailscale" : "Waiting for sign-in",
+                approval: "Waiting for approval",
                 running: "Hosting",
                 failed: "Stopped with an error",
               }[host.phase]
@@ -108,14 +109,39 @@ export function Host() {
           </div>
         )}
 
-        {host.phase === "login" && host.loginUrl && (
+        {host.phase === "login" && (
           <div className="callout">
             <div>
-              Approve the new <b>{host.hostname}</b> machine with <b>your</b> Tailscale account. This only happens once.
+              {host.notice ? (
+                <>
+                  {host.notice} Sign in with <b>your</b> Tailscale account; shares and settings are kept.
+                </>
+              ) : (
+                <>
+                  Approve the new <b>{host.hostname}</b> machine with <b>your</b> Tailscale account. This only happens
+                  once.
+                </>
+              )}
             </div>
-            <button className="primary" onClick={() => void openUrl(host.loginUrl!)}>
-              Sign in
-            </button>
+            {host.loginUrl ? (
+              <button className="primary" onClick={() => void openUrl(host.loginUrl!)}>
+                Sign in
+              </button>
+            ) : (
+              <span className="dim small">Getting a sign-in link…</span>
+            )}
+          </div>
+        )}
+        {host.phase === "approval" && (
+          <div className="callout">
+            <div>{host.notice || "Waiting for a tailnet admin to approve this machine."}</div>
+            <button onClick={() => void openUrl(machinesURL)}>Open admin console</button>
+          </div>
+        )}
+        {running && host.warning && (
+          <div className="callout warn">
+            <div>{host.warning}</div>
+            <button onClick={() => void openUrl(machinesURL)}>Open admin console</button>
           </div>
         )}
         {host.phase === "starting" && (

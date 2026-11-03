@@ -346,6 +346,8 @@ struct StatusDoc {
     phase: String,
     url: Option<String>,
     login_url: Option<String>,
+    notice: Option<String>,
+    warning: Option<String>,
     error: Option<String>,
     hostname: String,
     updated: String,
@@ -357,12 +359,17 @@ pub fn status() -> HostState {
     let mut st =
         HostState { state_dir: state_dir().to_string_lossy().into_owned(), ..Default::default() };
     let Ok(b) = fs::read(status_file()) else { return st };
-    let Ok(doc) = serde_json::from_slice::<StatusDoc>(&b) else { return st };
     let fresh = fs::metadata(status_file())
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| SystemTime::now().duration_since(t).ok())
         .is_some_and(|age| age < Duration::from_secs(20));
+    parse_status(&b, fresh, &mut st);
+    st
+}
+
+fn parse_status(b: &[u8], fresh: bool, st: &mut HostState) {
+    let Ok(doc) = serde_json::from_slice::<StatusDoc>(b) else { return };
     let _ = doc.updated;
     st.hostname = doc.hostname;
     st.error = doc.error.filter(|e| !e.is_empty());
@@ -370,6 +377,7 @@ pub fn status() -> HostState {
         (_, false) if doc.phase != "failed" => Phase::Stopped,
         ("starting", _) => Phase::Starting,
         ("login", _) => Phase::Login,
+        ("approval", _) => Phase::Approval,
         ("running", _) => Phase::Running,
         ("failed", _) => Phase::Failed,
         _ => Phase::Stopped,
@@ -378,9 +386,14 @@ pub fn status() -> HostState {
         st.url = doc.url;
     }
     if st.phase == Phase::Login {
-        st.login_url = doc.login_url;
+        st.login_url = doc.login_url.filter(|u| !u.is_empty());
     }
-    st
+    if matches!(st.phase, Phase::Login | Phase::Approval) {
+        st.notice = doc.notice.filter(|n| !n.is_empty());
+    }
+    if st.phase == Phase::Running {
+        st.warning = doc.warning.filter(|w| !w.is_empty());
+    }
 }
 
 pub fn log_tail(lines: usize) -> Vec<String> {
@@ -401,6 +414,31 @@ mod tests {
         assert_eq!(win_quote(r"C:\dir with space\"), r#""C:\dir with space\\""#);
         assert_eq!(win_quote(r#"a"b"#), r#""a\"b""#);
         assert_eq!(xml_escape(r#"<a & "b">"#), "&lt;a &amp; &quot;b&quot;&gt;");
+    }
+
+    #[test]
+    fn status_notices() {
+        let parse = |json: &str, fresh| {
+            let mut st = HostState::default();
+            parse_status(json.as_bytes(), fresh, &mut st);
+            st
+        };
+        let st = parse(
+            r#"{"phase":"login","loginUrl":"","notice":"removed","hostname":"h","updated":""}"#,
+            true,
+        );
+        assert_eq!(st.phase, Phase::Login);
+        assert_eq!((st.login_url, st.notice.as_deref()), (None, Some("removed")));
+        let st =
+            parse(r#"{"phase":"approval","notice":"approve","hostname":"h","updated":""}"#, true);
+        assert_eq!(st.phase, Phase::Approval);
+        let st = parse(
+            r#"{"phase":"running","url":"https://x","warning":"key","hostname":"h","updated":""}"#,
+            true,
+        );
+        assert_eq!(st.warning.as_deref(), Some("key"));
+        let st = parse(r#"{"phase":"login","notice":"x","hostname":"h","updated":""}"#, false);
+        assert_eq!((st.phase, st.notice), (Phase::Stopped, None));
     }
 
     /// Installs, starts, checks and removes the real background service.

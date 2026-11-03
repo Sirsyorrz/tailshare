@@ -20,6 +20,8 @@ pub enum Phase {
     Starting,
     /// Waiting for someone to approve the node in the browser.
     Login,
+    /// Signed in, but the tailnet requires an admin to approve new machines.
+    Approval,
     Running,
     Failed,
 }
@@ -30,6 +32,10 @@ pub struct HostState {
     pub phase: Phase,
     pub url: Option<String>,
     pub login_url: Option<String>,
+    /// Why it's waiting, e.g. the node was removed in the admin console.
+    pub notice: Option<String>,
+    /// Hosting works but something needs attention (key expiring, offline).
+    pub warning: Option<String>,
     pub error: Option<String>,
     pub hostname: String,
     pub state_dir: String,
@@ -82,6 +88,7 @@ pub fn server_bin() -> anyhow::Result<PathBuf> {
 struct Event {
     event: String,
     url: Option<String>,
+    reason: Option<String>,
     message: Option<String>,
 }
 
@@ -167,13 +174,21 @@ impl Host {
                 h.update(&a, |g| match ev.event.as_str() {
                     "login" => {
                         g.state.phase = Phase::Login;
-                        g.state.login_url = ev.url;
+                        g.state.login_url = ev.url.filter(|u| !u.is_empty());
+                        g.state.notice = ev.reason;
+                    }
+                    "approval" => {
+                        g.state.phase = Phase::Approval;
+                        g.state.login_url = None;
+                        g.state.notice = ev.reason;
                     }
                     "serving" => {
                         g.state.phase = Phase::Running;
                         g.state.url = ev.url;
                         g.state.login_url = None;
+                        g.state.notice = None;
                     }
+                    "warning" => g.state.warning = ev.message.filter(|m| !m.is_empty()),
                     "error" => g.state.error = ev.message,
                     _ => {}
                 });
@@ -210,6 +225,8 @@ impl Host {
             }
             g.state.url = None;
             g.state.login_url = None;
+            g.state.notice = None;
+            g.state.warning = None;
         });
     }
 

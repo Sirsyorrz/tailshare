@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -161,9 +162,13 @@ func event(kind string, fields map[string]string) {
 	status.set(func(st *statusDoc) {
 		switch kind {
 		case "login":
-			st.Phase, st.LoginURL = "login", fields["url"]
+			st.Phase, st.LoginURL, st.Notice = "login", fields["url"], fields["reason"]
+		case "approval":
+			st.Phase, st.LoginURL, st.Notice = "approval", "", fields["reason"]
 		case "serving":
-			st.Phase, st.URL, st.LoginURL = "running", fields["url"], ""
+			st.Phase, st.URL, st.LoginURL, st.Notice = "running", fields["url"], "", ""
+		case "warning":
+			st.Warning = fields["message"]
 		case "error":
 			st.Phase, st.Error = "failed", fields["message"]
 		case "stopped":
@@ -308,26 +313,29 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool,
 		return nil, nil, errors.New("no HTTPS cert domain for this node")
 	}
 	fqdn := domains[0]
+	var current atomic.Pointer[string]
+	current.Store(&fqdn)
 	lc, err := ts.LocalClient()
 	if err != nil {
 		return nil, nil, err
 	}
 	// Issuing the cert can take over a minute; do it now rather than inside
 	// the first visitor's TLS handshake, where browsers give up.
-	go func() {
-		if _, _, err := lc.CertPair(ctx, fqdn); err != nil {
+	prefetchCert := func(name string) {
+		if _, _, err := lc.CertPair(ctx, name); err != nil {
 			log.Printf("fetching HTTPS cert: %v", err)
 			return
 		}
-		log.Printf("HTTPS cert ready")
-	}()
+		log.Printf("HTTPS cert ready for %s", name)
+	}
+	go prefetchCert(fqdn)
 
 	plain, err := ts.Listen("tcp", ":80")
 	if err != nil {
 		return nil, nil, err
 	}
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "https://"+fqdn+r.URL.RequestURI(), http.StatusMovedPermanently)
+		http.Redirect(w, r, "https://"+*current.Load()+r.URL.RequestURI(), http.StatusMovedPermanently)
 	})
 	go httpServer(redirect).Serve(plain)
 
@@ -343,5 +351,11 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool,
 		Reach:    func(ctx context.Context) ([]reach.Peer, error) { return reach.Check(ctx, lc, 443) },
 		Version:  version,
 	})
+	watch := newNodeWatch(lc, fqdn, func(name string) {
+		srv.SetHosts(name)
+		current.Store(&name)
+		go prefetchCert(name)
+	})
+	go watch.run(ctx, lc)
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }

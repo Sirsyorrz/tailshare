@@ -14,9 +14,12 @@ import (
 // itself (background hosting). Updated is refreshed every few seconds so a
 // crashed server is recognisable by a stale file.
 type statusDoc struct {
-	Phase    string    `json:"phase"`
-	URL      string    `json:"url,omitempty"`
-	LoginURL string    `json:"loginUrl,omitempty"`
+	Phase    string `json:"phase"`
+	URL      string `json:"url,omitempty"`
+	LoginURL string `json:"loginUrl,omitempty"`
+	// Notice says why it's waiting (signed out, key expired, approval).
+	Notice   string    `json:"notice,omitempty"`
+	Warning  string    `json:"warning,omitempty"`
 	Error    string    `json:"error,omitempty"`
 	Hostname string    `json:"hostname"`
 	Version  string    `json:"version"`

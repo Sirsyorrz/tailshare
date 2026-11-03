@@ -29,7 +29,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
 
-		if !s.hosts[stripDefaultPort(r.Host)] {
+		if !s.isHost(r.Host) {
 			http.Error(w, "unknown host", http.StatusMisdirectedRequest)
 			return
 		}
@@ -73,7 +73,7 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 		scheme = "https://"
 	}
 	host, ok := strings.CutPrefix(o, scheme)
-	return ok && s.hosts[stripDefaultPort(host)]
+	return ok && s.isHost(host)
 }
 
 func stripDefaultPort(h string) string {

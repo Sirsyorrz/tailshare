@@ -202,7 +202,8 @@ code {
   background: var(--ok);
 }
 .dot.starting,
-.dot.login {
+.dot.login,
+.dot.approval {
   background: var(--sel);
 }
 .dot.failed {

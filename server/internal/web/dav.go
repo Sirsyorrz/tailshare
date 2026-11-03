@@ -459,7 +459,7 @@ func (s *Server) davMove(w http.ResponseWriter, r *http.Request, t davTarget) {
 		httpError(w, http.StatusBadRequest, "bad destination")
 		return
 	}
-	if dest.Host != "" && !s.hosts[stripDefaultPort(dest.Host)] {
+	if dest.Host != "" && !s.isHost(dest.Host) {
 		httpError(w, http.StatusBadGateway, "destination is on another server")
 		return
 	}

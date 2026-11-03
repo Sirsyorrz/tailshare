@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Sirsyorrz/tailshare/server/internal/activity"
@@ -43,7 +44,7 @@ type Options struct {
 
 type Server struct {
 	opt   Options
-	hosts map[string]bool
+	hosts atomic.Pointer[map[string]bool]
 
 	// cfgWrite serialises config file writes and reloads.
 	cfgWrite sync.Mutex
@@ -56,11 +57,23 @@ type Server struct {
 }
 
 func New(opt Options) *Server {
-	s := &Server{opt: opt, hosts: map[string]bool{}, shares: map[string]*store.Share{}, cfg: &config.Config{}}
-	for _, h := range opt.Hosts {
-		s.hosts[h] = true
-	}
+	s := &Server{opt: opt, shares: map[string]*store.Share{}, cfg: &config.Config{}}
+	s.SetHosts(opt.Hosts...)
 	return s
+}
+
+// SetHosts replaces the names the server answers to, e.g. after the node
+// was renamed in the Tailscale admin console.
+func (s *Server) SetHosts(hosts ...string) {
+	m := map[string]bool{}
+	for _, h := range hosts {
+		m[h] = true
+	}
+	s.hosts.Store(&m)
+}
+
+func (s *Server) isHost(h string) bool {
+	return (*s.hosts.Load())[stripDefaultPort(h)]
 }
 
 // Load swaps in a new config. Shares that fail to open are logged and left
