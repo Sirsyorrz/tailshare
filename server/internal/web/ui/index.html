@@ -5,46 +5,97 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>tailshare</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="app.css" />
-    <script src="app.js" defer></script>
+    <script type="module" src="js/main.js"></script>
   </head>
   <body>
     <div id="app">
       <header class="topbar">
+        <button id="btn-nav" class="icon-btn nav-toggle" title="Shares" aria-label="Shares"></button>
         <span class="brand">tailshare</span>
+        <button id="btn-back" class="icon-btn" title="Back (Alt+Left)" aria-label="Back"></button>
+        <button id="btn-up" class="icon-btn" title="Up a folder (Backspace)" aria-label="Up a folder"></button>
         <nav id="crumbs" class="crumbs"></nav>
-        <span class="spacer"></span>
-        <button id="btn-zip" hidden>Download all</button>
-        <button id="btn-mkdir" hidden>New folder</button>
-        <button id="btn-upload" hidden>Upload</button>
-        <input id="file-input" type="file" multiple hidden />
+        <label id="search-box" class="search" hidden>
+          <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" />
+        </label>
       </header>
+
       <aside class="sidebar">
         <div class="sidebar-h">Shares</div>
         <ul id="shares" class="share-list"></ul>
-        <div id="transfers-h" class="sidebar-h" hidden>Transfers</div>
+        <div id="transfers-h" class="sidebar-h with-action" hidden>
+          <span>Uploads <span id="transfers-count" class="count"></span></span>
+          <button id="transfers-clear" class="link" hidden>Clear done</button>
+        </div>
         <ul id="transfers" class="transfer-list"></ul>
         <div id="admin-h" class="sidebar-h" hidden>Admin</div>
         <ul id="admin" class="share-list" hidden></ul>
       </aside>
+      <div id="nav-scrim" class="nav-scrim"></div>
+
       <main id="main" class="main">
-        <div id="empty" class="empty dim"></div>
-        <table id="files" class="files" hidden>
-          <thead>
-            <tr><th>Name</th><th class="num">Size</th><th class="num">Modified</th><th></th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-        <div id="dropzone" class="dropzone" hidden>Drop files to upload</div>
+        <section id="browser" class="browser" hidden>
+          <div class="toolbar">
+            <div id="tb-normal" class="tb-group">
+              <button id="btn-upload" class="primary" hidden></button>
+              <button id="btn-mkdir" hidden></button>
+              <button id="btn-dlall" hidden></button>
+            </div>
+            <div id="tb-select" class="tb-group" hidden>
+              <button id="btn-clearsel" class="icon-btn" title="Clear selection (Esc)" aria-label="Clear selection"></button>
+              <span id="sel-count" class="sel-count"></span>
+              <button id="btn-dl" class="primary"></button>
+              <button id="btn-rename"></button>
+              <button id="btn-move"></button>
+              <button id="btn-delete" class="danger"></button>
+            </div>
+            <span class="spacer"></span>
+            <div id="view-controls" class="tb-group">
+              <select id="sort" title="Sort by" aria-label="Sort by"></select>
+              <button id="sort-dir" class="icon-btn" aria-label="Sort direction"></button>
+              <div class="seg">
+                <button id="btn-details" class="icon-btn" title="Details" aria-label="Details view"></button>
+                <button id="btn-grid" class="icon-btn" title="Thumbnails" aria-label="Thumbnail view"></button>
+              </div>
+            </div>
+          </div>
+          <div id="chips" class="chips" hidden></div>
+          <div id="banner" class="banner" hidden></div>
+          <div id="list" class="list"></div>
+        </section>
+        <div id="empty" class="empty" hidden></div>
         <div id="admin-view" class="admin-view" hidden></div>
+        <div id="dropzone" class="dropzone" hidden>Drop files or folders to upload here</div>
       </main>
+
       <footer class="statusbar">
+        <span id="counts" class="counts"></span>
         <span id="status-msg"></span>
         <span class="spacer"></span>
         <span id="whoami" class="dim"></span>
       </footer>
     </div>
+
+    <input id="file-input" type="file" multiple hidden />
+    <input id="folder-input" type="file" webkitdirectory multiple hidden />
+
+    <div id="lightbox" class="lightbox" hidden>
+      <div class="lb-bar">
+        <div class="lb-title">
+          <div id="lb-name" class="lb-name"></div>
+          <div id="lb-meta" class="dim"></div>
+        </div>
+        <a id="lb-download" class="btn"><span>Download</span></a>
+        <button id="lb-close" class="icon-btn" title="Close (Esc)" aria-label="Close"></button>
+      </div>
+      <button id="lb-prev" class="lb-nav prev icon-btn" aria-label="Previous"></button>
+      <div id="lb-stage" class="lb-stage"></div>
+      <button id="lb-next" class="lb-nav next icon-btn" aria-label="Next"></button>
+    </div>
+
     <div id="modal-back" class="modal-back" hidden>
       <form id="modal" class="modal">
         <div id="modal-title" class="modal-title"></div>
@@ -56,6 +107,21 @@
           <button type="submit" id="modal-ok">OK</button>
         </div>
       </form>
+    </div>
+
+    <div id="picker-back" class="modal-back" hidden>
+      <div class="modal picker">
+        <div id="picker-title" class="modal-title"></div>
+        <div class="picker-path">
+          <button id="picker-up" class="icon-btn" aria-label="Up">&#8593;</button>
+          <code id="picker-path"></code>
+        </div>
+        <ul id="picker-list" class="picker-list"></ul>
+        <div class="modal-actions">
+          <button type="button" id="picker-cancel">Cancel</button>
+          <button type="button" id="picker-ok" class="primary">Move here</button>
+        </div>
+      </div>
     </div>
   </body>
 </html>

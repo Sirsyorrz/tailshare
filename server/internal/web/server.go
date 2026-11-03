@@ -182,7 +182,14 @@ func (s *Server) hasAnyAccess(userID int64, login string) bool {
 func (s *Server) Handler() http.Handler {
 	ui, _ := fs.Sub(uiFS, "ui")
 	mux := http.NewServeMux()
-	mux.Handle("GET /", http.FileServerFS(ui))
+	files := http.FileServerFS(ui)
+	// Embedded files have no modtime, so nothing to validate against; the
+	// UI is small and a stale mix of old and new modules after an upgrade
+	// would break the page.
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})
 	// Lets the desktop app tell tailshare nodes apart from other web servers
 	// on the tailnet.
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {

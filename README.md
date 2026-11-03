@@ -7,6 +7,19 @@ with no passwords. Not affiliated with Tailscale.
 Early stage. The headless server, web UI and desktop app work; mounting as a
 drive and released builds are still to come.
 
+## Web UI
+
+What friends see. It works like a file manager: details and thumbnail views,
+sorting by name, date, type or size, type filters, search in the current
+folder (Enter searches subfolders too), multi-select with Ctrl/Shift and
+checkboxes, right-click menus, drag items onto folders or the breadcrumbs to
+move them, a preview lightbox for images, video, audio and text, uploads of
+files or whole folders (resumable, any size), and zip downloads of any
+selection. Back/forward and reloads keep your place.
+
+Thumbnails need download permission. Video thumbnails, and HEIC/AVIF photos,
+need `ffmpeg` on the server's PATH; without it those show an icon.
+
 ## Desktop app
 
 `app/` is a Tauri app that bundles the server. It can host from your computer
@@ -92,7 +105,9 @@ names can be mixed in a list.
 ## Files on disk
 
 Each share gets a hidden `.tailshare/` folder: unfinished uploads, trash (kept 30
-days, restorable from the admin Trash page) and `owners.json` (who uploaded what).
+days, restorable from the admin Trash page), `owners.json` (who uploaded what)
+and cached thumbnails (remade after 60 days; read-only shares don't
+cache).
 The state directory holds the Tailscale node identity, `config.json` and
 `activity.log` (one JSON object per line, append only).
 
