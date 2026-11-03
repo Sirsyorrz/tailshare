@@ -1,8 +1,12 @@
 package web
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"image"
+	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -273,4 +277,72 @@ func TestAdminsOwnEveryShare(t *testing.T) {
 	if w := do(ext, req("GET", "/api/shares/s/list", nil, nil)); w.Code != http.StatusNotFound {
 		t.Fatalf("admin from a shared-in device got owner access: %d", w.Code)
 	}
+}
+
+func TestPreviewEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "deep", "er"), 0o755)
+	var png bytes.Buffer
+	pngEncode(&png)
+	os.WriteFile(filepath.Join(dir, "deep", "er", "photo.png"), png.Bytes(), 0o644)
+	os.WriteFile(filepath.Join(dir, "evil.html"), []byte("<script>alert(1)</script>"), 0o644)
+	os.WriteFile(filepath.Join(dir, "evil.svg"), []byte("<svg onload=alert(1)>"), 0o644)
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello"), 0o644)
+	cfg := &config.Config{Shares: []config.Share{{Name: "s", Path: dir, Access: map[string]perm.Set{
+		"a@x": perm.Presets["viewer"], "peek@x": perm.View,
+	}}}}
+	h := serverAs(t, identity.User{ID: 3, Login: "a@x"}, cfg)
+
+	w := do(h, req("GET", "/api/shares/s/thumb?path=deep/er/photo.png", nil, nil))
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("thumb: %d %s", w.Code, w.Body)
+	}
+	if w := do(h, req("GET", "/api/shares/s/thumb?path=notes.txt", nil, nil)); w.Code != 404 {
+		t.Errorf("thumb of text file: %d", w.Code)
+	}
+	for _, p := range []string{"evil.html", "evil.svg"} {
+		if w := do(h, req("GET", "/api/shares/s/view?path="+p, nil, nil)); w.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("view %s served inline: %d", p, w.Code)
+		}
+	}
+	w = do(h, req("GET", "/api/shares/s/view?path=notes.txt", nil, nil))
+	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain") || !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Errorf("view text: %d %v", w.Code, w.Header())
+	}
+
+	w = do(h, req("GET", "/api/shares/s/search?q=PHOTO", nil, nil))
+	if !strings.Contains(w.Body.String(), `"path":"deep/er/photo.png"`) {
+		t.Errorf("search: %s", w.Body)
+	}
+
+	w = do(h, req("GET", "/api/shares/s/zip?path=notes.txt&path=deep", nil, nil))
+	if w.Code != 200 || !strings.Contains(w.Header().Get("Content-Disposition"), "s.zip") {
+		t.Fatalf("multi zip: %d %v", w.Code, w.Header())
+	}
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if got := strings.Join(names, " "); got != "notes.txt deep/ deep/er/ deep/er/photo.png" {
+		t.Errorf("zip entries: %s", got)
+	}
+	if w := do(h, req("GET", "/api/shares/s/zip?path=nope", nil, nil)); w.Code != 404 {
+		t.Errorf("zip of missing path: %d", w.Code)
+	}
+
+	peek := serverAs(t, identity.User{ID: 4, Login: "peek@x"}, cfg)
+	for _, p := range []string{"thumb?path=deep/er/photo.png", "view?path=notes.txt"} {
+		if w := do(peek, req("GET", "/api/shares/s/"+p, nil, nil)); w.Code != http.StatusForbidden {
+			t.Errorf("view-only user got %s: %d", p, w.Code)
+		}
+	}
+}
+
+func pngEncode(w io.Writer) {
+	img := image.NewRGBA(image.Rect(0, 0, 800, 600))
+	png.Encode(w, img)
 }

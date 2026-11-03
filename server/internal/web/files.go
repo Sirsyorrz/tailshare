@@ -1,12 +1,14 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"mime"
 	"net/http"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Sirsyorrz/tailshare/server/internal/activity"
@@ -21,6 +23,10 @@ func (s *Server) fileRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/shares/{share}/list", s.withShare(perm.View, s.list))
 	mux.HandleFunc("GET /api/shares/{share}/download", s.withShare(perm.Download, s.download))
 	mux.HandleFunc("GET /api/shares/{share}/zip", s.withShare(perm.View|perm.Download, s.zip))
+	// Previews show file contents, so they need download, not just view.
+	mux.HandleFunc("GET /api/shares/{share}/thumb", s.withShare(perm.View|perm.Download, s.thumb))
+	mux.HandleFunc("GET /api/shares/{share}/view", s.withShare(perm.View|perm.Download, s.view))
+	mux.HandleFunc("GET /api/shares/{share}/search", s.withShare(perm.View, s.search))
 	mux.HandleFunc("POST /api/shares/{share}/mkdir", s.withShare(perm.Mkdir, s.mkdir))
 	mux.HandleFunc("POST /api/shares/{share}/rename", s.withShare(perm.Rename, s.rename))
 	mux.HandleFunc("POST /api/shares/{share}/delete", s.withShare(0, s.delete))
@@ -189,24 +195,121 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, c shareCtx) {
 }
 
 func (s *Server) zip(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	p := r.URL.Query().Get("path")
-	name, err := c.sh.ZipName(p)
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 {
+		paths = []string{""}
+	}
+	if len(paths) > 5000 {
+		httpError(w, http.StatusBadRequest, "too many items")
+		return
+	}
+	name, err := c.sh.ZipName(paths...)
 	if err != nil {
 		storeError(w, err)
 		return
 	}
-	attachment(w, "application/zip", name+".zip")
-	start := time.Now()
-	n, err := c.sh.WriteZip(w, p)
-	e := activity.Entry{Action: "download-zip", Share: c.sh.Name, Path: p, Bytes: n, Seconds: time.Since(start).Seconds()}
-	if err != nil {
-		// Headers are already sent, so the client just sees a cut-off zip.
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrNotDir) || errors.Is(err, store.ErrBadPath) {
+	// Check the paths before headers go out, so a bad one is a clean error.
+	for _, p := range paths {
+		if _, err := c.sh.Stat(p); err != nil {
+			storeError(w, err)
 			return
 		}
+	}
+	attachment(w, "application/zip", name+".zip")
+	start := time.Now()
+	n, err := c.sh.WriteZip(w, paths...)
+	e := activity.Entry{Action: "download-zip", Share: c.sh.Name, Path: strings.Join(paths, ", "), Bytes: n, Seconds: time.Since(start).Seconds()}
+	if err != nil {
+		// Headers are already sent, so the client just sees a cut-off zip.
 		e.Note = "incomplete"
 	}
 	s.record(r, e)
+}
+
+var thumbSizes = map[string]int{"": 320, "small": 320, "large": 1600}
+
+func (s *Server) thumb(w http.ResponseWriter, r *http.Request, c shareCtx) {
+	size, ok := thumbSizes[r.URL.Query().Get("size")]
+	if !ok {
+		httpError(w, http.StatusBadRequest, "bad size")
+		return
+	}
+	b, mod, err := c.sh.Thumbnail(r.Context(), r.URL.Query().Get("path"), size)
+	if errors.Is(err, store.ErrNoPreview) {
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		httpError(w, http.StatusNotFound, "no preview")
+		return
+	}
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "image/jpeg")
+	// The client puts the file's mtime in the URL, so a changed file gets a
+	// new URL and this can be cached hard.
+	h.Set("Cache-Control", "private, max-age=604800")
+	h.Set("Last-Modified", mod.UTC().Format(http.TimeFormat))
+	w.Write(b)
+}
+
+// inlineTypes are the only types served for display in the page. Anything
+// that can run script (HTML, SVG, XML) is never on this list.
+var inlineTypes = map[string]string{
+	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+	".webp": "image/webp", ".avif": "image/avif", ".bmp": "image/bmp",
+	// .mov and .mkv are usually H.264 inside; browsers play them under these
+	// types even though the containers differ.
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/mp4", ".mkv": "video/webm",
+	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".opus": "audio/ogg",
+	".wav": "audio/wav", ".flac": "audio/flac",
+	".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".log": "text/plain; charset=utf-8",
+	".csv": "text/plain; charset=utf-8", ".json": "text/plain; charset=utf-8",
+}
+
+// view serves a file for the preview lightbox: inline, with a type from
+// the allow list (never sniffed), sandboxed, and with Range support so
+// video can seek.
+func (s *Server) view(w http.ResponseWriter, r *http.Request, c shareCtx) {
+	p := r.URL.Query().Get("path")
+	ct, ok := inlineTypes[strings.ToLower(path.Ext(p))]
+	if !ok {
+		httpError(w, http.StatusUnsupportedMediaType, "can't preview this type")
+		return
+	}
+	f, st, err := c.sh.OpenFile(p)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	defer f.Close()
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	h.Set("Content-Disposition", "inline")
+	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	h.Set("Cache-Control", "private, max-age=3600")
+	http.ServeContent(w, r, "", st.ModTime(), f)
+}
+
+type searchHit struct {
+	store.Hit
+	Mine bool `json:"mine,omitempty"`
+}
+
+func (s *Server) search(w http.ResponseWriter, r *http.Request, c shareCtx) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	hits, truncated, err := c.sh.Search(ctx, r.URL.Query().Get("path"), r.URL.Query().Get("q"), 1000)
+	if err != nil {
+		storeError(w, err)
+		return
+	}
+	me := userOf(r).ID
+	out := make([]searchHit, len(hits))
+	for i, h := range hits {
+		out[i] = searchHit{Hit: h, Mine: h.Owner != 0 && h.Owner == me}
+	}
+	writeJSON(w, map[string]any{"hits": out, "truncated": truncated})
 }
 
 type countingWriter struct {

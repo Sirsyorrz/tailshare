@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const uiCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+const uiCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; " +
 	"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
 // csrfHeader must be on every state-changing request. Browsers won't send a

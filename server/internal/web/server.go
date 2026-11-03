@@ -92,6 +92,7 @@ func (s *Server) Housekeep(ctx context.Context) {
 		for _, sh := range s.shares {
 			sh.PurgeUploads(7 * 24 * time.Hour)
 			sh.PurgeTrash(30 * 24 * time.Hour)
+			sh.PurgeThumbs(60 * 24 * time.Hour)
 		}
 		s.mu.RUnlock()
 		select {

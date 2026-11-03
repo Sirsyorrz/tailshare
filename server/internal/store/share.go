@@ -27,9 +27,10 @@ const (
 // Share is one shared folder. Every filesystem call goes through root, which
 // the OS confines to the folder (no "..", no symlinks pointing outside).
 type Share struct {
-	Name string
-	dir  string
-	root *os.Root
+	Name     string
+	dir      string
+	root     *os.Root
+	writable bool
 
 	mu      sync.Mutex
 	uploads map[string]*upload
@@ -49,7 +50,7 @@ func Open(name, dir string, writable bool) (*Share, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Share{Name: name, dir: dir, root: r, uploads: map[string]*upload{}, owners: map[string]Owner{}}
+	s := &Share{Name: name, dir: dir, root: r, writable: writable, uploads: map[string]*upload{}, owners: map[string]Owner{}}
 	if writable {
 		if err := r.MkdirAll(uploadsDir, 0o700); err != nil {
 			r.Close()
@@ -241,4 +242,14 @@ func randID(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// Stat reports whether p exists inside the share.
+func (s *Share) Stat(p string) (fs.FileInfo, error) {
+	rel, err := cleanRel(p)
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.root.Stat(rel)
+	return st, mapErr(err)
 }

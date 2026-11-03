@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	go4.org/netipx v0.0.0-20260823151212-3075585bcbeb
+	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.49.0
 	tailscale.com v1.104.5
 )
