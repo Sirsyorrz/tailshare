@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +29,9 @@ import (
 	"github.com/Sirsyorrz/tailshare/server/internal/web"
 )
 
+// version is set at release build time with -ldflags "-X main.version=...".
+var version = "dev"
+
 const emptyConfig = `{
   "admins": [],
   "shares": []
@@ -45,35 +51,57 @@ func main() {
 	devUser := flag.String("dev-user", "dev@local", "dev only: identity every request gets")
 	defRoots, _ := os.UserHomeDir()
 	rootsFlag := flag.String("roots", defRoots, "comma-separated folders shares may be created in from the admin API")
+	bootstrapAdmin := flag.String("bootstrap-admin", "", "login or id:<userid> made admin when the config has no admins")
+	flag.BoolVar(&eventsOut, "events", false, "print machine-readable TAILSHARE-EVENT lines on stdout (for the desktop app)")
+	exitOnEOF := flag.Bool("exit-on-eof", false, "exit when stdin closes, so a parent app's crash can't leave the server running")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	if *cfgPath == "" {
 		*cfgPath = filepath.Join(*stateDir, "config.json")
 	}
 	// The state dir holds the node key; a copy lets someone impersonate the node.
 	if err := os.MkdirAll(*stateDir, 0o700); err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if err := os.Chmod(*stateDir, 0o700); err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	if _, err := os.Stat(*cfgPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.WriteFile(*cfgPath, []byte(emptyConfig), 0o600); err != nil {
-			log.Fatal(err)
+			fatal(err)
 		}
 		log.Printf("created empty config at %s", *cfgPath)
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
+	}
+	if *bootstrapAdmin != "" && len(cfg.Admins) == 0 {
+		cfg.Admins = []string{*bootstrapAdmin}
+		if err := cfg.Save(*cfgPath); err != nil {
+			fatal(err)
+		}
+		log.Printf("made %s admin", *bootstrapAdmin)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *exitOnEOF {
+		go func() {
+			io.Copy(io.Discard, os.Stdin)
+			log.Print("stdin closed, shutting down")
+			stop()
+		}()
+	}
 
 	act, err := activity.Open(filepath.Join(*stateDir, "activity.log"))
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	defer act.Close()
 
@@ -85,22 +113,42 @@ func main() {
 		srv, serve, err = tailscaleMode(ctx, *stateDir, *hostname, *verbose, act)
 	}
 	if err != nil {
-		log.Fatal(err)
+		fatal(err)
 	}
 	srv.Configure(*cfgPath, splitRoots(*rootsFlag))
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
 	go srv.WatchReach(ctx)
-	go reloadOnHUP(ctx, srv)
+	go reloadOnSignal(ctx, srv)
 
 	errc := make(chan error, 1)
 	go func() { errc <- serve() }()
 	select {
 	case err := <-errc:
-		log.Fatal(err)
+		fatal(err)
 	case <-ctx.Done():
 		log.Print("shutting down")
+		event("stopped", nil)
 	}
+}
+
+// eventsOut is set by -events. The desktop app reads these lines instead of
+// scraping human-readable logs.
+var eventsOut bool
+
+func event(kind string, fields map[string]string) {
+	if !eventsOut {
+		return
+	}
+	m := map[string]string{"event": kind}
+	maps.Copy(m, fields)
+	b, _ := json.Marshal(m)
+	fmt.Fprintf(os.Stdout, "TAILSHARE-EVENT %s\n", b)
+}
+
+func fatal(err error) {
+	event("error", map[string]string{"message": err.Error()})
+	log.Fatal(err)
 }
 
 func splitRoots(s string) []string {
@@ -113,9 +161,9 @@ func splitRoots(s string) []string {
 	return out
 }
 
-func reloadOnHUP(ctx context.Context, srv *web.Server) {
+func reloadOnSignal(ctx context.Context, srv *web.Server) {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGHUP)
+	notifyReload(c)
 	for {
 		select {
 		case <-ctx.Done():
@@ -146,19 +194,21 @@ func devMode(addr, user string, act *activity.Log) (*web.Server, func() error, e
 		return nil, nil, err
 	}
 	log.Printf("DEV MODE: no Tailscale, every request is %s. http://%s", user, addr)
+	event("serving", map[string]string{"url": "http://" + addr})
 	srv := web.New(web.Options{
 		Resolver: identity.Fixed{User: identity.User{ID: 1, Login: user, Display: user, Node: "dev"}},
 		Hosts:    []string{addr},
 		Activity: act,
+		Version:  version,
 	})
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }
 
-// dumpOnUSR1 logs the peers this node can see and the access rules it was
+// dumpOnSignal logs the peers this node can see and the access rules it was
 // given, for working out why someone can't connect.
-func dumpOnUSR1(ctx context.Context, lc *local.Client) {
+func dumpOnSignal(ctx context.Context, lc *local.Client) {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGUSR1)
+	notifyDump(c)
 	for {
 		select {
 		case <-ctx.Done():
@@ -200,6 +250,9 @@ func dedupLogf() func(string, ...any) {
 		}
 		last = msg
 		log.Print(msg)
+		if _, url, ok := strings.Cut(msg, "go to: "); ok && strings.HasPrefix(url, "https://") {
+			event("login", map[string]string{"url": strings.TrimSpace(url)})
+		}
 	}
 }
 
@@ -245,15 +298,17 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool,
 	})
 	go httpServer(redirect).Serve(plain)
 
-	go dumpOnUSR1(ctx, lc)
+	go dumpOnSignal(ctx, lc)
 
 	log.Printf("serving https://%s", fqdn)
+	event("serving", map[string]string{"url": "https://" + fqdn})
 	srv := web.New(web.Options{
 		Resolver: identity.Tailscale{LC: lc},
 		Hosts:    []string{fqdn},
 		HTTPS:    true,
 		Activity: act,
 		Reach:    func(ctx context.Context) ([]reach.Peer, error) { return reach.Check(ctx, lc, 443) },
+		Version:  version,
 	})
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }

@@ -34,7 +34,8 @@ type Options struct {
 	// ConfigPath is where admin edits are saved. Empty disables editing.
 	ConfigPath string
 	// Roots are the only folders shares may be created in.
-	Roots []string
+	Roots   []string
+	Version string
 }
 
 type Server struct {
@@ -176,6 +177,11 @@ func (s *Server) Handler() http.Handler {
 	ui, _ := fs.Sub(uiFS, "ui")
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(ui))
+	// Lets the desktop app tell tailshare nodes apart from other web servers
+	// on the tailnet.
+	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"app": "tailshare", "version": s.opt.Version})
+	})
 	s.fileRoutes(mux)
 	s.adminRoutes(mux)
 	s.adminConfigRoutes(mux)
