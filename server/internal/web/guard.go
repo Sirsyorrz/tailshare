@@ -25,7 +25,7 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Content-Security-Policy", uiCSP)
-		if s.https {
+		if s.opt.HTTPS {
 			h.Set("Strict-Transport-Security", "max-age=31536000")
 		}
 
@@ -50,14 +50,14 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			}
 		}
 
-		u, err := s.resolver.Resolve(r.Context(), r.RemoteAddr)
+		u, err := s.opt.Resolver.Resolve(r.Context(), r.RemoteAddr)
 		if err != nil {
 			log.Printf("rejected %s: %v", r.RemoteAddr, err)
 			http.Error(w, "tailshare only serves Tailscale users", http.StatusForbidden)
 			return
 		}
 		if _, dup := s.seen.LoadOrStore(u.Node+"|"+u.Login, true); !dup {
-			log.Printf("identity login=%s id=%d display=%q node=%s", u.Login, u.ID, u.Display, u.Node)
+			log.Printf("identity login=%s id=%d display=%q node=%s external=%v", u.Login, u.ID, u.Display, u.Node, u.External)
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, u)))
 	})
@@ -69,7 +69,7 @@ func (s *Server) sameOrigin(r *http.Request) bool {
 		return true
 	}
 	scheme := "http://"
-	if s.https {
+	if s.opt.HTTPS {
 		scheme = "https://"
 	}
 	host, ok := strings.CutPrefix(o, scheme)

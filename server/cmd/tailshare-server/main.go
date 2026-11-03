@@ -18,8 +18,10 @@ import (
 	"tailscale.com/client/local"
 	"tailscale.com/tsnet"
 
+	"github.com/Sirsyorrz/tailshare/server/internal/activity"
 	"github.com/Sirsyorrz/tailshare/server/internal/config"
 	"github.com/Sirsyorrz/tailshare/server/internal/identity"
+	"github.com/Sirsyorrz/tailshare/server/internal/reach"
 	"github.com/Sirsyorrz/tailshare/server/internal/web"
 )
 
@@ -66,18 +68,25 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	act, err := activity.Open(filepath.Join(*stateDir, "activity.log"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer act.Close()
+
 	var srv *web.Server
 	var serve func() error
 	if *devListen != "" {
-		srv, serve, err = devMode(*devListen, *devUser)
+		srv, serve, err = devMode(*devListen, *devUser, act)
 	} else {
-		srv, serve, err = tailscaleMode(ctx, *stateDir, *hostname, *verbose)
+		srv, serve, err = tailscaleMode(ctx, *stateDir, *hostname, *verbose, act)
 	}
 	if err != nil {
 		log.Fatal(err)
 	}
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
+	go srv.WatchReach(ctx)
 	go reloadOnHUP(ctx, srv, *cfgPath)
 
 	errc := make(chan error, 1)
@@ -113,7 +122,7 @@ func httpServer(h http.Handler) *http.Server {
 	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 }
 
-func devMode(addr, user string) (*web.Server, func() error, error) {
+func devMode(addr, user string, act *activity.Log) (*web.Server, func() error, error) {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, nil, err
@@ -126,7 +135,11 @@ func devMode(addr, user string) (*web.Server, func() error, error) {
 		return nil, nil, err
 	}
 	log.Printf("DEV MODE: no Tailscale, every request is %s. http://%s", user, addr)
-	srv := web.New(identity.Fixed{User: identity.User{ID: 1, Login: user, Display: user, Node: "dev"}}, []string{addr}, false)
+	srv := web.New(web.Options{
+		Resolver: identity.Fixed{User: identity.User{ID: 1, Login: user, Display: user, Node: "dev"}},
+		Hosts:    []string{addr},
+		Activity: act,
+	})
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }
 
@@ -179,7 +192,7 @@ func dedupLogf() func(string, ...any) {
 	}
 }
 
-func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool) (*web.Server, func() error, error) {
+func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool, act *activity.Log) (*web.Server, func() error, error) {
 	ts := &tsnet.Server{Hostname: hostname, Dir: filepath.Join(stateDir, "tsnet"), UserLogf: dedupLogf()}
 	if verbose {
 		ts.Logf = log.Printf
@@ -224,6 +237,12 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool)
 	go dumpOnUSR1(ctx, lc)
 
 	log.Printf("serving https://%s", fqdn)
-	srv := web.New(identity.Tailscale{LC: lc}, []string{fqdn}, true)
+	srv := web.New(web.Options{
+		Resolver: identity.Tailscale{LC: lc},
+		Hosts:    []string{fqdn},
+		HTTPS:    true,
+		Activity: act,
+		Reach:    func(ctx context.Context) ([]reach.Peer, error) { return reach.Check(ctx, lc, 443) },
+	})
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }

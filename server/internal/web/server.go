@@ -5,29 +5,37 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log"
-	"mime"
 	"net/http"
-	"path"
-	"strconv"
 	"sync"
 	"time"
 
+	"github.com/Sirsyorrz/tailshare/server/internal/activity"
 	"github.com/Sirsyorrz/tailshare/server/internal/config"
 	"github.com/Sirsyorrz/tailshare/server/internal/identity"
-	"github.com/Sirsyorrz/tailshare/server/internal/perm"
+	"github.com/Sirsyorrz/tailshare/server/internal/reach"
 	"github.com/Sirsyorrz/tailshare/server/internal/store"
 )
 
 //go:embed ui
 var uiFS embed.FS
 
+type Options struct {
+	Resolver identity.Resolver
+	// Hosts are the exact Host header values the server answers to; anything
+	// else is rejected to stop DNS rebinding.
+	Hosts    []string
+	HTTPS    bool
+	Activity *activity.Log
+	// Reach reports which peers the Tailscale policy lets connect. Nil in
+	// dev mode.
+	Reach func(context.Context) ([]reach.Peer, error)
+}
+
 type Server struct {
-	resolver identity.Resolver
-	hosts    map[string]bool
-	https    bool
+	opt   Options
+	hosts map[string]bool
 
 	mu     sync.RWMutex
 	cfg    *config.Config
@@ -36,11 +44,9 @@ type Server struct {
 	seen sync.Map
 }
 
-// New takes the exact Host header values the server answers to; anything
-// else is rejected to stop DNS rebinding.
-func New(r identity.Resolver, hosts []string, https bool) *Server {
-	s := &Server{resolver: r, hosts: map[string]bool{}, https: https, shares: map[string]*store.Share{}}
-	for _, h := range hosts {
+func New(opt Options) *Server {
+	s := &Server{opt: opt, hosts: map[string]bool{}, shares: map[string]*store.Share{}, cfg: &config.Config{}}
+	for _, h := range opt.Hosts {
 		s.hosts[h] = true
 	}
 	return s
@@ -51,8 +57,7 @@ func New(r identity.Resolver, hosts []string, https bool) *Server {
 func (s *Server) Load(cfg *config.Config) {
 	next := map[string]*store.Share{}
 	for _, sc := range cfg.Shares {
-		writable := !sc.ReadOnly
-		sh, err := store.Open(sc.Name, sc.Path, writable)
+		sh, err := store.Open(sc.Name, sc.Path, !sc.ReadOnly)
 		if err != nil {
 			log.Printf("share %q (%s) disabled: %v", sc.Name, sc.Path, err)
 			continue
@@ -87,21 +92,69 @@ func (s *Server) Housekeep(ctx context.Context) {
 	}
 }
 
+// WatchReach logs when someone who has been given access can't connect
+// because of the Tailscale policy, and when someone accepts the share but
+// has no access yet. Each state is logged once, when it changes.
+func (s *Server) WatchReach(ctx context.Context) {
+	if s.opt.Reach == nil {
+		return
+	}
+	last := map[string]string{}
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		peers, err := s.opt.Reach(ctx)
+		if err != nil {
+			log.Printf("policy check: %v", err)
+		}
+		for _, p := range peers {
+			key := p.Login + "|" + p.Node
+			state := ""
+			hasAccess := s.hasAnyAccess(p.UserID, p.Login)
+			switch {
+			case hasAccess && !p.CanReach:
+				state = "blocked"
+			case p.External && !hasAccess && p.CanReach:
+				state = "no-access"
+			}
+			if state == last[key] {
+				continue
+			}
+			last[key] = state
+			switch state {
+			case "blocked":
+				log.Printf("WARNING: %s (%s) has access to shares, but the tailnet policy blocks their device from port 443. "+
+					"Add a grant like {\"src\": [\"autogroup:shared\"], \"dst\": [\"<this node>\"], \"ip\": [\"443\"]}.", p.Login, p.Node)
+			case "no-access":
+				log.Printf("%s (id:%d) can reach tailshare but has no access to any share yet", p.Login, p.UserID)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *Server) hasAnyAccess(userID int64, login string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now()
+	for i := range s.cfg.Shares {
+		if s.cfg.Shares[i].GrantFor(userID, login, now).Perms != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) Handler() http.Handler {
 	ui, _ := fs.Sub(uiFS, "ui")
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(ui))
-	mux.HandleFunc("GET /api/me", s.me)
-	mux.HandleFunc("GET /api/shares/{share}/list", s.withShare(perm.View, s.list))
-	mux.HandleFunc("GET /api/shares/{share}/download", s.withShare(perm.Download, s.download))
-	mux.HandleFunc("POST /api/shares/{share}/mkdir", s.withShare(perm.Mkdir, s.mkdir))
-	mux.HandleFunc("POST /api/shares/{share}/rename", s.withShare(perm.Rename, s.rename))
-	mux.HandleFunc("POST /api/shares/{share}/delete", s.withShare(perm.Delete, s.delete))
-	mux.HandleFunc("POST /api/shares/{share}/uploads", s.withShare(perm.Upload, s.uploadCreate))
-	mux.HandleFunc("GET /api/shares/{share}/uploads/{id}", s.withShare(perm.Upload, s.uploadStatus))
-	mux.HandleFunc("PUT /api/shares/{share}/uploads/{id}", s.withShare(perm.Upload, s.uploadChunk))
-	mux.HandleFunc("POST /api/shares/{share}/uploads/{id}/complete", s.withShare(perm.Upload, s.uploadComplete))
-	mux.HandleFunc("DELETE /api/shares/{share}/uploads/{id}", s.withShare(perm.Upload, s.uploadCancel))
+	s.fileRoutes(mux)
+	s.adminRoutes(mux)
 	return s.guard(mux)
 }
 
@@ -109,234 +162,10 @@ type ctxKey struct{}
 
 func userOf(r *http.Request) identity.User { return r.Context().Value(ctxKey{}).(identity.User) }
 
-type shareCtx struct {
-	sh    *store.Share
-	perms perm.Set
-}
-
-// withShare resolves the share and checks need. A share the user has no
-// rights on at all is reported as missing, so names don't leak.
-func (s *Server) withShare(need perm.Set, h func(http.ResponseWriter, *http.Request, shareCtx)) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		u := userOf(r)
-		name := r.PathValue("share")
-		s.mu.RLock()
-		sh := s.shares[name]
-		var p perm.Set
-		if sh != nil {
-			for i := range s.cfg.Shares {
-				if s.cfg.Shares[i].Name == name {
-					p = s.cfg.Shares[i].PermsFor(u.ID, u.Login)
-				}
-			}
-		}
-		s.mu.RUnlock()
-		if sh == nil || p == 0 {
-			httpError(w, http.StatusNotFound, "share not found")
-			return
-		}
-		if !p.Has(need) {
-			httpError(w, http.StatusForbidden, "not allowed")
-			return
-		}
-		h(w, r, shareCtx{sh: sh, perms: p})
-	}
-}
-
-type shareInfo struct {
-	Name  string   `json:"name"`
-	Perms perm.Set `json:"perms"`
-}
-
-func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+func (s *Server) record(r *http.Request, e activity.Entry) {
 	u := userOf(r)
-	out := struct {
-		User   identity.User `json:"user"`
-		Shares []shareInfo   `json:"shares"`
-	}{User: u, Shares: []shareInfo{}}
-	s.mu.RLock()
-	for i := range s.cfg.Shares {
-		sc := &s.cfg.Shares[i]
-		if s.shares[sc.Name] == nil {
-			continue
-		}
-		if p := sc.PermsFor(u.ID, u.Login); p != 0 {
-			out.Shares = append(out.Shares, shareInfo{Name: sc.Name, Perms: p})
-		}
-	}
-	s.mu.RUnlock()
-	writeJSON(w, out)
-}
-
-func (s *Server) list(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	ents, err := c.sh.List(r.URL.Query().Get("path"))
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	writeJSON(w, ents)
-}
-
-func (s *Server) download(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	p := r.URL.Query().Get("path")
-	f, st, err := c.sh.OpenFile(p)
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	defer f.Close()
-	h := w.Header()
-	h.Set("Content-Type", "application/octet-stream")
-	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": st.Name()}))
-	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	cw := &countingWriter{ResponseWriter: w}
-	start := time.Now()
-	http.ServeContent(cw, r, "", st.ModTime(), f)
-
-	// Players and resumed downloads send many small Range requests; only
-	// whole-file requests and sizeable ranges are worth a log line.
-	if r.Header.Get("Range") != "" && cw.n < 1<<20 {
-		return
-	}
-	secs := time.Since(start).Seconds()
-	detail := fmt.Sprintf("%s (%d of %d bytes in %.1fs, %.1f MB/s)", p, cw.n, st.Size(), secs, float64(cw.n)/1e6/max(secs, 0.001))
-	if cw.n < st.Size() && r.Header.Get("Range") == "" {
-		detail += " incomplete"
-	}
-	activity(r, "download", c.sh.Name, detail)
-}
-
-type countingWriter struct {
-	http.ResponseWriter
-	n int64
-}
-
-func (c *countingWriter) Write(b []byte) (int, error) {
-	n, err := c.ResponseWriter.Write(b)
-	c.n += int64(n)
-	return n, err
-}
-
-func (s *Server) mkdir(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	var in struct{ Path, Name string }
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if err := c.sh.Mkdir(in.Path, in.Name); err != nil {
-		storeError(w, err)
-		return
-	}
-	activity(r, "mkdir", c.sh.Name, path.Join(in.Path, in.Name))
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) rename(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	var in struct{ Path, ToDir, Name string }
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if err := c.sh.Rename(in.Path, in.ToDir, in.Name); err != nil {
-		storeError(w, err)
-		return
-	}
-	activity(r, "rename", c.sh.Name, in.Path+" -> "+path.Join(in.ToDir, in.Name))
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) delete(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	var in struct{ Path string }
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if err := c.sh.Delete(in.Path, userOf(r).Login); err != nil {
-		storeError(w, err)
-		return
-	}
-	activity(r, "delete", c.sh.Name, in.Path)
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func (s *Server) uploadCreate(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	var in struct {
-		Dir, Name string
-		Size      int64
-	}
-	if !readJSON(w, r, &in) {
-		return
-	}
-	info, err := c.sh.CreateUpload(userOf(r).ID, in.Dir, in.Name, in.Size)
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	writeJSON(w, info)
-}
-
-func (s *Server) uploadStatus(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	info, err := c.sh.UploadStatus(r.PathValue("id"), userOf(r).ID)
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	writeJSON(w, info)
-}
-
-func (s *Server) uploadChunk(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	off, err := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
-	if err != nil || off < 0 {
-		httpError(w, http.StatusBadRequest, "bad offset")
-		return
-	}
-	cur, err := c.sh.WriteChunk(r.PathValue("id"), userOf(r).ID, off, r.Body)
-	if errors.Is(err, store.ErrOffset) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]any{"error": "offset mismatch", "offset": cur})
-		return
-	}
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	writeJSON(w, map[string]int64{"offset": cur})
-}
-
-func (s *Server) uploadComplete(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	var in struct{ Replace bool }
-	if !readJSON(w, r, &in) {
-		return
-	}
-	if in.Replace && !c.perms.Has(perm.Overwrite) {
-		httpError(w, http.StatusForbidden, "not allowed to overwrite")
-		return
-	}
-	u := userOf(r)
-	st, err := c.sh.UploadStatus(r.PathValue("id"), u.ID)
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	name, err := c.sh.CompleteUpload(st.ID, u.ID, in.Replace, u.Login)
-	if err != nil {
-		storeError(w, err)
-		return
-	}
-	activity(r, "upload", c.sh.Name, path.Join(st.Dir, name)+" ("+strconv.FormatInt(st.Size, 10)+" bytes)")
-	writeJSON(w, map[string]string{"name": name})
-}
-
-func (s *Server) uploadCancel(w http.ResponseWriter, r *http.Request, c shareCtx) {
-	if err := c.sh.CancelUpload(r.PathValue("id"), userOf(r).ID); err != nil {
-		storeError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// activity is the audit trail until the append-only log file exists.
-func activity(r *http.Request, action, share, detail string) {
-	u := userOf(r)
-	log.Printf("activity user=%s id=%d node=%s action=%s share=%q path=%q", u.Login, u.ID, u.Node, action, share, detail)
+	e.UserID, e.Login, e.Node, e.External = u.ID, u.Login, u.Node, u.External
+	s.opt.Activity.Add(e)
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

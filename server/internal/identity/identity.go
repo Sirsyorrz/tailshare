@@ -14,6 +14,9 @@ type User struct {
 	Login   string `json:"login"`
 	Display string `json:"display"`
 	Node    string `json:"node"`
+	// External is true for devices of users outside this tailnet who reach
+	// the node through a share. They can never use admin features.
+	External bool `json:"external"`
 }
 
 var ErrNoUser = errors.New("connection has no Tailscale user")
@@ -35,10 +38,11 @@ func (t Tailscale) Resolve(ctx context.Context, remoteAddr string) (User, error)
 		return User{}, ErrNoUser
 	}
 	return User{
-		ID:      int64(w.UserProfile.ID),
-		Login:   w.UserProfile.LoginName,
-		Display: w.UserProfile.DisplayName,
-		Node:    nodeName(w.Node),
+		ID:       int64(w.UserProfile.ID),
+		Login:    w.UserProfile.LoginName,
+		Display:  w.UserProfile.DisplayName,
+		Node:     nodeName(w.Node),
+		External: w.Node.Hostinfo.Valid() && w.Node.Hostinfo.ShareeNode(),
 	}, nil
 }
 
