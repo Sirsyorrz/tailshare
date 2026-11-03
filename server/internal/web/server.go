@@ -9,6 +9,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"path"
 	"strconv"
 	"sync"
 	"time"
@@ -202,7 +203,7 @@ func (s *Server) mkdir(w http.ResponseWriter, r *http.Request, c shareCtx) {
 		storeError(w, err)
 		return
 	}
-	activity(r, "mkdir", c.sh.Name, in.Path+"/"+in.Name)
+	activity(r, "mkdir", c.sh.Name, path.Join(in.Path, in.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -215,7 +216,7 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, c shareCtx) {
 		storeError(w, err)
 		return
 	}
-	activity(r, "rename", c.sh.Name, in.Path+" -> "+in.ToDir+"/"+in.Name)
+	activity(r, "rename", c.sh.Name, in.Path+" -> "+path.Join(in.ToDir, in.Name))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -297,7 +298,7 @@ func (s *Server) uploadComplete(w http.ResponseWriter, r *http.Request, c shareC
 		storeError(w, err)
 		return
 	}
-	activity(r, "upload", c.sh.Name, st.Dir+"/"+name+" ("+strconv.FormatInt(st.Size, 10)+" bytes)")
+	activity(r, "upload", c.sh.Name, path.Join(st.Dir, name)+" ("+strconv.FormatInt(st.Size, 10)+" bytes)")
 	writeJSON(w, map[string]string{"name": name})
 }
 
