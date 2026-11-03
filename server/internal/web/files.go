@@ -87,6 +87,8 @@ type shareInfo struct {
 	Used    int64      `json:"used"`
 	Quota   int64      `json:"quota,omitempty"`
 	Expires *time.Time `json:"expires,omitempty"`
+	// Owner is set for admins, who have full control of every share.
+	Owner bool `json:"owner,omitempty"`
 }
 
 func (s *Server) isAdmin(u identity.User) bool {
@@ -127,7 +129,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		if g.Perms == 0 {
 			continue
 		}
-		info := shareInfo{Name: sc.Name, Perms: g.Perms, Used: sh.Usage(u.ID)}
+		info := shareInfo{Name: sc.Name, Perms: g.Perms, Used: sh.Usage(u.ID), Owner: s.isAdminLocked(u)}
 		if g.Limited {
 			info.Quota = g.QuotaBytes
 		}

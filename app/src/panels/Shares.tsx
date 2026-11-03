@@ -402,21 +402,16 @@ function AccessTable({
                     </span>
                   </td>
                   <td>
-                    {exp && !/^\d{4}-\d{2}-\d{2}$/.test(exp) ? (
-                      <span className="small">{new Date(exp).toLocaleString()}</span>
-                    ) : (
-                      <input
-                        type="date"
-                        value={exp}
-                        onChange={(e) =>
-                          onChange((s) => {
-                            s.expires ??= {};
-                            if (e.target.value) s.expires[k] = e.target.value;
-                            else delete s.expires[k];
-                          })
-                        }
-                      />
-                    )}
+                    <ExpiryCell
+                      value={exp}
+                      onChange={(v) =>
+                        onChange((s) => {
+                          s.expires ??= {};
+                          if (v) s.expires[k] = v;
+                          else delete s.expires[k];
+                        })
+                      }
+                    />
                   </td>
                   <td className="right">
                     <button
@@ -557,5 +552,41 @@ function ServerSettings({
         </div>
       </div>
     </>
+  );
+}
+
+function isoDay(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// "" means the access never expires.
+function ExpiryCell({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  if (!value) {
+    return (
+      <select
+        value="never"
+        onChange={(e) => {
+          if (e.target.value !== "date") return;
+          const d = new Date();
+          d.setDate(d.getDate() + 30);
+          onChange(isoDay(d));
+        }}
+      >
+        <option value="never">Never expires</option>
+        <option value="date">Until a date...</option>
+      </select>
+    );
+  }
+  return (
+    <span className="row-inline">
+      {/^\d{4}-\d{2}-\d{2}$/.test(value) ? (
+        <input type="date" value={value} min={isoDay(new Date())} onChange={(e) => onChange(e.target.value)} />
+      ) : (
+        <span className="small">{new Date(value).toLocaleString()}</span>
+      )}
+      <button title="Never expire" onClick={() => onChange("")}>
+        Never
+      </button>
+    </span>
   );
 }

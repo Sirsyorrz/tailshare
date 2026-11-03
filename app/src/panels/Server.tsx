@@ -69,7 +69,9 @@ export function Server({ server }: { server: ServerT }) {
                   <tr key={s.name}>
                     <td>{s.name}</td>
                     <td className="small">
-                      {describePerms(s.perms)}
+                      {s.owner
+                        ? `Owner: full control${s.perms.includes("upload") ? "" : " (read-only share)"}`
+                        : describePerms(s.perms)}
                       {s.expires && <div className="dim">until {new Date(new Date(s.expires).getTime() - 1).toLocaleDateString()}</div>}
                     </td>
                     <td className="small">

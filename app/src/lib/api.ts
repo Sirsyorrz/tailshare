@@ -53,6 +53,7 @@ export interface ShareInfo {
   used: number;
   quota?: number;
   expires?: string;
+  owner?: boolean;
 }
 
 export interface Me {

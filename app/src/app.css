@@ -488,3 +488,9 @@ ul.plain .row {
 .row.tight {
   margin: 0;
 }
+.row-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}

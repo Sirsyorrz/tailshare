@@ -47,6 +47,7 @@ on("ts:view", () => {
 });
 
 function shareDetail(s) {
+  if (s.owner) return s.perms.includes("upload") ? "" : "read-only";
   const parts = [permLabel(s.perms)];
   if (s.expires) parts.push("until " + new Date(new Date(s.expires).getTime() - 1).toLocaleDateString());
   return parts.join(" \u00b7 ");
@@ -61,7 +62,7 @@ function renderShares() {
       "li",
       { class: active ? "active" : "", onclick: () => (location.hash = "#" + encodeURIComponent(s.name)) },
       el("span", { class: "sname", text: s.name }),
-      el("span", { class: "perms", text: shareDetail(s) }),
+      shareDetail(s) ? el("span", { class: "perms", text: shareDetail(s) }) : null,
     );
     if (s.quota) {
       const bar = el("div", { class: "bar" + (s.used / s.quota > 0.9 ? " bad" : "") }, el("div"));
