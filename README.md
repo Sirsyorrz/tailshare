@@ -23,6 +23,11 @@ npm run tauri dev
 
 Needs Go, Rust and Node. `npm run server` builds the bundled server on its own.
 
+"Keep hosting when tailshare is closed" moves the server into a systemd user
+service (Linux, with lingering so it starts at boot) or a hidden logon task
+(Windows). The app then follows it through `status.json` and `server.log` in
+its state folder.
+
 ## Run the server
 
 Needs Go 1.24+ and a tailnet with MagicDNS and HTTPS certificates enabled.

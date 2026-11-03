@@ -49,11 +49,12 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose Tailscale logs")
 	devListen := flag.String("dev-listen", "", "dev only: serve plain HTTP on this loopback address without Tailscale")
 	devUser := flag.String("dev-user", "dev@local", "dev only: identity every request gets")
-	defRoots, _ := os.UserHomeDir()
-	rootsFlag := flag.String("roots", defRoots, "comma-separated folders shares may be created in from the admin API")
+	rootsFlag := flag.String("roots", "", "comma-separated folders shares may be created in from the admin API (default: home folder, unless -roots-file is set)")
 	rootsFile := flag.String("roots-file", "", "file listing more allowed folders, one per line, re-read on every use")
 	bootstrapAdmin := flag.String("bootstrap-admin", "", "login or id:<userid> made admin when the config has no admins")
 	flag.BoolVar(&eventsOut, "events", false, "print machine-readable TAILSHARE-EVENT lines on stdout (for the desktop app)")
+	statusFile := flag.String("status-file", "", "keep this JSON file updated with the server's state (for the desktop app)")
+	logFile := flag.String("log-file", "", "also write the log to this file")
 	exitOnEOF := flag.Bool("exit-on-eof", false, "exit when stdin closes, so a parent app's crash can't leave the server running")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -65,6 +66,19 @@ func main() {
 	if *cfgPath == "" {
 		*cfgPath = filepath.Join(*stateDir, "config.json")
 	}
+	if *logFile != "" {
+		if err := openLogFile(*logFile); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *statusFile != "" {
+		status = newStatusWriter(*statusFile)
+		status.set(func(st *statusDoc) { st.Phase = "starting"; st.Hostname = *hostname })
+		defer status.set(func(st *statusDoc) { st.Phase = "stopped"; st.URL, st.LoginURL = "", "" })
+	}
+	if *rootsFlag == "" && *rootsFile == "" {
+		*rootsFlag, _ = os.UserHomeDir()
+	}
 	// The state dir holds the node key; a copy lets someone impersonate the node.
 	if err := os.MkdirAll(*stateDir, 0o700); err != nil {
 		fatal(err)
@@ -72,6 +86,12 @@ func main() {
 	if err := os.Chmod(*stateDir, 0o700); err != nil {
 		fatal(err)
 	}
+	// Two servers on one state dir would fight over the same Tailscale node.
+	unlock, err := lockDir(*stateDir)
+	if err != nil {
+		fatal(fmt.Errorf("another tailshare server is already using %s", *stateDir))
+	}
+	defer unlock()
 	if _, err := os.Stat(*cfgPath); errors.Is(err, os.ErrNotExist) {
 		if err := os.WriteFile(*cfgPath, []byte(emptyConfig), 0o600); err != nil {
 			fatal(err)
@@ -138,6 +158,18 @@ func main() {
 var eventsOut bool
 
 func event(kind string, fields map[string]string) {
+	status.set(func(st *statusDoc) {
+		switch kind {
+		case "login":
+			st.Phase, st.LoginURL = "login", fields["url"]
+		case "serving":
+			st.Phase, st.URL, st.LoginURL = "running", fields["url"], ""
+		case "error":
+			st.Phase, st.Error = "failed", fields["message"]
+		case "stopped":
+			st.Phase, st.URL, st.LoginURL = "stopped", "", ""
+		}
+	})
 	if !eventsOut {
 		return
 	}

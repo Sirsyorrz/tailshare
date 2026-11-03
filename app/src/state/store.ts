@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { get, baseOf, type HostState, type Me, type Settings, type Tailnet } from "../lib/api";
+import { get, baseOf, type HostSnapshot, type HostState, type Me, type Settings, type Tailnet } from "../lib/api";
 
 export interface Server {
   base: string;
@@ -24,12 +24,15 @@ interface State {
   selected: Selection;
   host: HostState;
   hostLog: string[];
+  background: boolean;
+  backgroundSupported: boolean;
   settings: Settings | null;
 
   say: (message: string) => void;
   setShowSettings: (v: boolean) => void;
   select: (s: Selection) => void;
   scan: () => Promise<void>;
+  loadHost: () => Promise<void>;
   loadSettings: () => Promise<void>;
   saveSettings: (s: Settings) => Promise<void>;
 }
@@ -46,11 +49,24 @@ export const useStore = create<State>((set, getState) => ({
   selected: { kind: "host" },
   host: { phase: "stopped", hostname: "", stateDir: "" },
   hostLog: [],
+  background: false,
+  backgroundSupported: false,
   settings: null,
 
   say: (message) => set({ message }),
   setShowSettings: (showSettings) => set({ showSettings }),
   select: (selected) => set({ selected }),
+
+  loadHost: async () => {
+    const snap = await invoke<HostSnapshot>("host_state");
+    const was = getState().host.phase;
+    set({ host: snap.state, hostLog: snap.log, background: snap.background, backgroundSupported: snap.backgroundSupported });
+    // The new node takes a moment to appear to this computer's Tailscale.
+    if (snap.state.phase === "running" && was !== "running") {
+      setTimeout(() => void getState().scan(), 3000);
+      setTimeout(() => void getState().scan(), 15000);
+    }
+  },
 
   loadSettings: async () => set({ settings: await invoke<Settings>("get_settings") }),
   saveSettings: async (s) => {

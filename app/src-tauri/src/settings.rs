@@ -7,6 +7,8 @@ use std::path::PathBuf;
 pub struct Settings {
     /// Start hosting when the app opens.
     pub host_on_launch: bool,
+    /// Host through an OS service that runs without the app.
+    pub background: bool,
     /// Tailscale machine name for the hosted node.
     pub hostname: String,
     /// Folders shares may be created in.
@@ -20,6 +22,7 @@ impl Default for Settings {
         let machine = crate::tailnet::machine_name();
         Settings {
             host_on_launch: false,
+            background: false,
             hostname: if machine.is_empty() {
                 "tailshare".into()
             } else {

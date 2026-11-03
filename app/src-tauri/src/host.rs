@@ -62,7 +62,12 @@ pub fn write_roots(roots: &[String]) -> std::io::Result<()> {
     std::fs::rename(tmp, dir.join("roots.txt"))
 }
 
-fn server_bin() -> anyhow::Result<PathBuf> {
+pub fn server_bin() -> anyhow::Result<PathBuf> {
+    // Tests run from target/debug/deps, away from the copied sidecar.
+    #[cfg(debug_assertions)]
+    if let Some(p) = std::env::var_os("TAILSHARE_SERVER_BIN") {
+        return Ok(PathBuf::from(p));
+    }
     let exe = std::env::current_exe()?;
     let dir = exe.parent().context("no exe dir")?;
     let name = if cfg!(windows) { "tailshare-server.exe" } else { "tailshare-server" };

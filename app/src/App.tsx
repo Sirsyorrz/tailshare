@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./state/store";
 import { Settings } from "./panels/Settings";
@@ -110,8 +109,7 @@ export default function App() {
     const st = useStore.getState();
     void (async () => {
       await st.loadSettings();
-      const snap = await invoke<{ state: HostState; log: string[] }>("host_state");
-      useStore.setState({ host: snap.state, hostLog: snap.log });
+      await st.loadHost();
       await useStore.getState().scan();
     })();
     const unlisten = [
@@ -127,8 +125,12 @@ export default function App() {
       listen<string>("host-log", (e) => useStore.setState((s) => ({ hostLog: [...s.hostLog.slice(-399), e.payload] }))),
     ];
     const t = setInterval(() => void useStore.getState().scan(), 60_000);
+    // A background server isn't our child, so its state is polled from its
+    // status file instead of pushed.
+    const poll = setInterval(() => useStore.getState().background && void useStore.getState().loadHost(), 2000);
     return () => {
       clearInterval(t);
+      clearInterval(poll);
       unlisten.forEach((p) => void p.then((f) => f()));
     };
   }, []);

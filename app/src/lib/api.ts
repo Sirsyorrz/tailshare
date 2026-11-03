@@ -125,6 +125,13 @@ export interface Browse {
 }
 
 export type Phase = "stopped" | "starting" | "login" | "running" | "failed";
+export interface HostSnapshot {
+  state: HostState;
+  log: string[];
+  background: boolean;
+  backgroundSupported: boolean;
+}
+
 export interface HostState {
   phase: Phase;
   url?: string;
@@ -136,6 +143,7 @@ export interface HostState {
 
 export interface Settings {
   hostOnLaunch: boolean;
+  background: boolean;
   hostname: string;
   roots: string[];
   servers: string[];

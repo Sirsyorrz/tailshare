@@ -12,6 +12,9 @@ export function Host() {
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [name, setName] = useState("");
+  const background = useStore((s) => s.background);
+  const bgSupported = useStore((s) => s.backgroundSupported);
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     if (settings) setName(settings.hostname);
@@ -21,7 +24,8 @@ export function Host() {
     setBusy(true);
     try {
       if (settings && name !== settings.hostname) await useStore.getState().saveSettings({ ...settings, hostname: name });
-      await invoke("host_start");
+      setNote((await invoke<string | null>("host_start")) ?? "");
+      await useStore.getState().loadHost();
     } catch (e) {
       useStore.getState().say(String(e));
     } finally {
@@ -32,6 +36,21 @@ export function Host() {
     setBusy(true);
     try {
       await invoke("host_stop");
+      await useStore.getState().loadHost();
+    } catch (e) {
+      useStore.getState().say(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const setBackground = async (v: boolean) => {
+    setBusy(true);
+    try {
+      setNote((await invoke<string | null>("set_background", { enabled: v })) ?? "");
+      await useStore.getState().loadSettings();
+      await useStore.getState().loadHost();
+    } catch (e) {
+      useStore.getState().say(String(e));
     } finally {
       setBusy(false);
     }
@@ -116,11 +135,29 @@ export function Host() {
           </div>
         )}
 
-        <label className="check">
-          <input type="checkbox" checked={!!settings?.hostOnLaunch} onChange={(e) => setOnLaunch(e.target.checked)} />
-          Start hosting when tailshare opens
-        </label>
-        <div className="dim small">Closing tailshare stops hosting.</div>
+        {note && <div className="dim small">{note}</div>}
+
+        {bgSupported && (
+          <label className="check">
+            <input type="checkbox" checked={background} disabled={busy} onChange={(e) => void setBackground(e.target.checked)} />
+            Keep hosting when tailshare is closed
+          </label>
+        )}
+        {background ? (
+          <div className="dim small">
+            Runs in the background and starts by itself{" "}
+            {navigator.userAgent.includes("Windows") ? "when you log in" : "when this computer starts"}. Stopping it here
+            keeps it off until you start it again.
+          </div>
+        ) : (
+          <>
+            <label className="check">
+              <input type="checkbox" checked={!!settings?.hostOnLaunch} onChange={(e) => setOnLaunch(e.target.checked)} />
+              Start hosting when tailshare opens
+            </label>
+            <div className="dim small">Closing tailshare stops hosting.</div>
+          </>
+        )}
       </div>
 
       {running && (
