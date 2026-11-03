@@ -31,6 +31,11 @@ export function People({ base }: { base: string }) {
 
   if (!status.policyKnown) return <div className="dim">This server can't check the tailnet policy (dev mode).</div>;
 
+  // Same rule as the server: admins own every share, so there's nothing to give.
+  const isAdmin = (userId: number, login: string, external: boolean) =>
+    (!external || !!config.allowExternalAdmins) &&
+    config.admins.some((a) => a.toLowerCase() === `id:${userId}` || (login && a.toLowerCase() === login.toLowerCase()));
+
   const accessOf = (userId: number, login: string) =>
     config.shares
       .map((s) => {
@@ -116,7 +121,9 @@ export function People({ base }: { base: string }) {
                     ))}
                   </td>
                   <td className="small">
-                    {access.length ? (
+                    {isAdmin(p.userId, p.login, p.external) ? (
+                      <span>Owner: every share</span>
+                    ) : access.length ? (
                       access.map((a) => <div key={a}>{a}</div>)
                     ) : granting === String(p.userId) ? (
                       // No onBlur close: WebKitGTK blurs the select when its
