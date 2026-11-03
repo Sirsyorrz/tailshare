@@ -30,7 +30,10 @@ fn get_settings() -> settings::Settings {
 }
 
 #[tauri::command]
-fn set_settings(s: settings::Settings) -> Res<()> {
+fn set_settings(mut s: settings::Settings) -> Res<()> {
+    if host::registered() {
+        s.hostname = settings::load().hostname;
+    }
     if !settings::valid_hostname(&s.hostname) {
         return Err("machine name may only use letters, digits and dashes".into());
     }
@@ -48,6 +51,7 @@ struct HostSnapshot {
     log: Vec<String>,
     background: bool,
     background_supported: bool,
+    registered: bool,
 }
 
 #[tauri::command]
@@ -60,7 +64,16 @@ async fn host_state(h: State<'_, host::Host>) -> Res<HostSnapshot> {
     } else {
         h.snapshot()
     };
-    Ok(HostSnapshot { state, log, background: bg, background_supported: background::supported() })
+    if let Some(u) = state.url.as_deref().filter(|_| bg) {
+        host::remember_machine(u);
+    }
+    Ok(HostSnapshot {
+        state,
+        log,
+        background: bg,
+        background_supported: background::supported(),
+        registered: host::registered(),
+    })
 }
 
 fn bg_args() -> background::Args {

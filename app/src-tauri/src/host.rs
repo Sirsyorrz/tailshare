@@ -59,6 +59,30 @@ pub fn state_dir() -> PathBuf {
     crate::data_dir().join("host")
 }
 
+/// Whether the hosted machine already exists on the tailnet. Its name is
+/// then owned by Tailscale: changing ours would only confuse things, and a
+/// rename in the admin console is picked up from the URL instead.
+pub fn registered() -> bool {
+    state_dir().join("tsnet").join("tailscaled.state").exists()
+}
+
+/// The machine name in a served URL, e.g. "tailshare-desktop".
+pub fn machine_of(url: &str) -> Option<String> {
+    let host = url::Url::parse(url).ok()?.host_str()?.to_string();
+    host.ends_with(".ts.net").then(|| host.split('.').next().unwrap_or_default().to_string())
+}
+
+/// Keeps the saved name equal to the real one, so the next start asks for
+/// the name the machine actually has.
+pub fn remember_machine(url: &str) {
+    let Some(name) = machine_of(url) else { return };
+    let mut s = crate::settings::load();
+    if s.hostname != name && crate::settings::valid_hostname(&name) {
+        s.hostname = name;
+        let _ = crate::settings::save(&s);
+    }
+}
+
 /// The server re-reads this on every use, so edits apply while hosting.
 pub fn write_roots(roots: &[String]) -> std::io::Result<()> {
     let dir = state_dir();
@@ -82,6 +106,18 @@ pub fn server_bin() -> anyhow::Result<PathBuf> {
         bail!("bundled server not found at {}", p.display());
     }
     Ok(p)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn machine_names() {
+        assert_eq!(
+            super::machine_of("https://tailshare-desktop.example.ts.net").as_deref(),
+            Some("tailshare-desktop")
+        );
+        assert_eq!(super::machine_of("http://127.0.0.1:8766"), None);
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -184,6 +220,12 @@ impl Host {
                     }
                     "serving" => {
                         g.state.phase = Phase::Running;
+                        if let Some(u) = &ev.url {
+                            if let Some(name) = machine_of(u) {
+                                g.state.hostname = name;
+                            }
+                            remember_machine(u);
+                        }
                         g.state.url = ev.url;
                         g.state.login_url = None;
                         g.state.notice = None;

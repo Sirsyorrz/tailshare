@@ -131,6 +131,7 @@ export interface HostSnapshot {
   log: string[];
   background: boolean;
   backgroundSupported: boolean;
+  registered: boolean;
 }
 
 export interface HostState {

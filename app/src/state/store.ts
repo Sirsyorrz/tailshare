@@ -26,6 +26,8 @@ interface State {
   hostLog: string[];
   background: boolean;
   backgroundSupported: boolean;
+  /// The hosted machine exists on the tailnet, so its name is fixed here.
+  registered: boolean;
   settings: Settings | null;
   drives: DrivesState;
 
@@ -34,6 +36,7 @@ interface State {
   select: (s: Selection) => void;
   scan: () => Promise<void>;
   loadHost: () => Promise<void>;
+  setHost: (h: HostState) => void;
   loadSettings: () => Promise<void>;
   saveSettings: (s: Settings) => Promise<void>;
   loadDrives: () => Promise<void>;
@@ -53,6 +56,7 @@ export const useStore = create<State>((set, getState) => ({
   hostLog: [],
   background: false,
   backgroundSupported: false,
+  registered: false,
   settings: null,
   drives: { running: false, mounts: [], transfers: [], log: [], names: {} },
 
@@ -62,13 +66,29 @@ export const useStore = create<State>((set, getState) => ({
 
   loadHost: async () => {
     const snap = await invoke<HostSnapshot>("host_state");
-    const was = getState().host.phase;
-    set({ host: snap.state, hostLog: snap.log, background: snap.background, backgroundSupported: snap.backgroundSupported });
+    set({ background: snap.background, backgroundSupported: snap.backgroundSupported, registered: snap.registered, hostLog: snap.log });
+    getState().setHost(snap.state);
+  },
+
+  setHost: (next) => {
+    const prev = getState().host;
+    set({ host: next });
+    if (next.phase !== "running" || !next.url || next.url === prev.url) return;
+    // Started, or renamed in the admin console: the server list, the
+    // selected server and the saved name all follow the new address.
+    const oldBase = prev.url ? baseOf(prev.url) : "";
+    const newBase = baseOf(next.url);
+    const sel = getState().selected;
+    set((s) => ({
+      registered: true,
+      servers: oldBase && oldBase !== newBase ? s.servers.filter((x) => x.base !== oldBase) : s.servers,
+      selected: sel.kind === "server" && sel.base === oldBase ? { kind: "server", base: newBase } : sel,
+    }));
+    void getState().loadSettings();
     // The new node takes a moment to appear to this computer's Tailscale.
-    if (snap.state.phase === "running" && was !== "running") {
-      setTimeout(() => void getState().scan(), 3000);
-      setTimeout(() => void getState().scan(), 15000);
-    }
+    void getState().scan();
+    setTimeout(() => void getState().scan(), 3000);
+    setTimeout(() => void getState().scan(), 15000);
   },
 
   loadDrives: async () => {

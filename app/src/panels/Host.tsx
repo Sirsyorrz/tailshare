@@ -9,6 +9,7 @@ export function Host() {
   const log = useStore((s) => s.hostLog);
   const settings = useStore((s) => s.settings);
   const tailnet = useStore((s) => s.tailnet);
+  const registered = useStore((s) => s.registered);
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [name, setName] = useState("");
@@ -23,7 +24,7 @@ export function Host() {
   const start = async () => {
     setBusy(true);
     try {
-      if (settings && name !== settings.hostname) await useStore.getState().saveSettings({ ...settings, hostname: name });
+      if (settings && !registered && name !== settings.hostname) await useStore.getState().saveSettings({ ...settings, hostname: name });
       setNote((await invoke<string | null>("host_start")) ?? "");
       await useStore.getState().loadHost();
     } catch (e) {
@@ -97,7 +98,7 @@ export function Host() {
           )}
         </div>
 
-        {!active && (
+        {!active && !registered && (
           <div className="row">
             <label className="field">
               Machine name
@@ -106,6 +107,12 @@ export function Host() {
             <span className="dim small">
               Becomes <code>https://{name || "\u2026"}.{tailnet?.node.split(".").slice(1).join(".") || "your-tailnet.ts.net"}</code>
             </span>
+          </div>
+        )}
+        {!active && registered && (
+          <div className="dim small">
+            Machine <b>{settings?.hostname}</b>. To rename it, rename the machine in the Tailscale admin console; tailshare
+            follows the new name.
           </div>
         )}
 

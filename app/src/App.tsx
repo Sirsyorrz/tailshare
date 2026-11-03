@@ -131,15 +131,7 @@ export default function App() {
       await useStore.getState().scan();
     })();
     const unlisten = [
-      listen<HostState>("host-state", (e) => {
-        const was = useStore.getState().host.phase;
-        useStore.setState({ host: e.payload });
-        // The new node takes a moment to appear to this computer's Tailscale.
-        if (e.payload.phase === "running" && was !== "running") {
-          setTimeout(() => void useStore.getState().scan(), 3000);
-          setTimeout(() => void useStore.getState().scan(), 15000);
-        }
-      }),
+      listen<HostState>("host-state", (e) => useStore.getState().setHost(e.payload)),
       listen<string>("host-log", (e) => useStore.setState((s) => ({ hostLog: [...s.hostLog.slice(-399), e.payload] }))),
     ];
     const t = setInterval(() => void useStore.getState().scan(), 60_000);

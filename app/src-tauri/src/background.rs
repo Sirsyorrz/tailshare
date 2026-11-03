@@ -383,6 +383,9 @@ fn parse_status(b: &[u8], fresh: bool, st: &mut HostState) {
         _ => Phase::Stopped,
     };
     if st.phase == Phase::Running {
+        if let Some(name) = doc.url.as_deref().and_then(crate::host::machine_of) {
+            st.hostname = name;
+        }
         st.url = doc.url;
     }
     if st.phase == Phase::Login {
