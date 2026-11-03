@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,6 +43,8 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose Tailscale logs")
 	devListen := flag.String("dev-listen", "", "dev only: serve plain HTTP on this loopback address without Tailscale")
 	devUser := flag.String("dev-user", "dev@local", "dev only: identity every request gets")
+	defRoots, _ := os.UserHomeDir()
+	rootsFlag := flag.String("roots", defRoots, "comma-separated folders shares may be created in from the admin API")
 	flag.Parse()
 
 	if *cfgPath == "" {
@@ -84,10 +87,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	srv.Configure(*cfgPath, splitRoots(*rootsFlag))
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
 	go srv.WatchReach(ctx)
-	go reloadOnHUP(ctx, srv, *cfgPath)
+	go reloadOnHUP(ctx, srv)
 
 	errc := make(chan error, 1)
 	go func() { errc <- serve() }()
@@ -99,7 +103,17 @@ func main() {
 	}
 }
 
-func reloadOnHUP(ctx context.Context, srv *web.Server, path string) {
+func splitRoots(s string) []string {
+	var out []string
+	for _, r := range strings.Split(s, ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func reloadOnHUP(ctx context.Context, srv *web.Server) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGHUP)
 	for {
@@ -107,12 +121,9 @@ func reloadOnHUP(ctx context.Context, srv *web.Server, path string) {
 		case <-ctx.Done():
 			return
 		case <-c:
-			cfg, err := config.Load(path)
-			if err != nil {
+			if err := srv.Reload(); err != nil {
 				log.Printf("reload failed, keeping old config: %v", err)
-				continue
 			}
-			srv.Load(cfg)
 		}
 	}
 }

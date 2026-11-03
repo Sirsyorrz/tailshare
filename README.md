@@ -86,7 +86,8 @@ If someone has access but the policy blocks them, the server logs a warning and
 the Status page marks them "blocked by tailnet policy". It works this out from the
 access rules Tailscale sends the node, so no API key is needed.
 
-`kill -USR1 <pid>` dumps the peers and access rules the node currently sees.
+`-roots /srv,/mnt/media` limits which folders the admin API may turn into shares
+(default: your home folder). `kill -USR1 <pid>` dumps the peers and access rules the node currently sees.
 
 ## Dev mode
 

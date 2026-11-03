@@ -2,6 +2,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -52,16 +54,67 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	c, err := Parse(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return c, nil
+}
+
+func Parse(b []byte) (*Config, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var c Config
 	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
 	}
 	if err := c.validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return nil, err
+	}
+	if c.Shares == nil {
+		c.Shares = []Share{}
+	}
+	if c.Admins == nil {
+		c.Admins = []string{}
 	}
 	return &c, nil
+}
+
+// Version identifies the config's content, for If-Match style updates.
+func (c *Config) Version() string {
+	b, _ := json.Marshal(c)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:8])
+}
+
+// Save writes atomically: a temp file in the same directory, fsynced, then
+// renamed over the old one.
+func (c *Config) Save(path string) error {
+	b, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".config-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
 
 func (c *Config) MinFreeBytes() int64 {

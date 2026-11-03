@@ -31,11 +31,18 @@ type Options struct {
 	// Reach reports which peers the Tailscale policy lets connect. Nil in
 	// dev mode.
 	Reach func(context.Context) ([]reach.Peer, error)
+	// ConfigPath is where admin edits are saved. Empty disables editing.
+	ConfigPath string
+	// Roots are the only folders shares may be created in.
+	Roots []string
 }
 
 type Server struct {
 	opt   Options
 	hosts map[string]bool
+
+	// cfgWrite serialises config file writes and reloads.
+	cfgWrite sync.Mutex
 
 	mu     sync.RWMutex
 	cfg    *config.Config
@@ -171,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /", http.FileServerFS(ui))
 	s.fileRoutes(mux)
 	s.adminRoutes(mux)
+	s.adminConfigRoutes(mux)
 	return s.guard(mux)
 }
 
