@@ -4,7 +4,7 @@ Share folders with friends across tailnets. Friends open a web page through a sh
 Tailscale node, and tailshare uses their Tailscale identity for per-folder permissions,
 with no passwords. Not affiliated with Tailscale.
 
-Early prototype: the headless server and web UI only.
+Early stage: the headless server and web UI work; the desktop app is next.
 
 ## Run the server
 
@@ -27,42 +27,66 @@ State (node identity and `config.json`) lives in `~/.config/tailshare` unless
 ```json
 {
   "admins": ["you@github"],
+  "minFreeGB": 20,
   "shares": [
     {
       "name": "footage",
       "path": "/srv/shared/footage",
       "access": {
         "you@github": "editor",
-        "friend@example.com": "contributor",
+        "id:1234567890": ["contributor", "deleteOwn"],
         "editor@example.com": ["view", "download", "upload"]
-      }
+      },
+      "quotaGB": { "id:1234567890": 500 },
+      "expires": { "editor@example.com": "2026-12-31" }
     }
   ]
 }
 ```
 
-Users are Tailscale login names or `id:<userid>`. Access is a preset or a list.
+Users are Tailscale login names or `id:<userid>` (preferred, since login names can
+change). The server logs each new identity it sees (`identity login=... id=...`),
+and the admin Status page lists people who accepted a share with their `id:`.
 
 | Preset | Permissions |
 |---|---|
 | `viewer` | view, download |
 | `contributor` | view, download, upload, mkdir |
-| `editor` | everything |
+| `editor` | view, download, upload, mkdir, overwrite, rename, delete |
 | `dropbox` | upload only |
 
 Individual permissions: `view`, `download`, `upload`, `mkdir`, `overwrite`,
-`rename`, `delete`. `"readOnly": true` on a share strips all write permissions.
+`rename`, `delete`, `deleteOwn` (only things they uploaded or created). Presets and
+names can be mixed in a list.
+
+| Option | Meaning |
+|---|---|
+| `admins` | Logins that get the admin pages (status, activity, trash). Only from devices in your own tailnet unless `allowExternalAdmins` is true. |
+| `minFreeGB` | Refuse uploads that would leave less than this free on a share's disk. Default 5. |
+| `readOnly` | Strip every write permission on the share. |
+| `quotaGB` | Per user cap on what they have uploaded into the share. |
+| `expires` | Last day (inclusive) of a user's access, or an RFC 3339 time. |
+
+## Files on disk
+
+Each share gets a hidden `.tailshare/` folder: unfinished uploads, trash (kept 30
+days, restorable from the admin Trash page) and `owners.json` (who uploaded what).
+The state directory holds the Tailscale node identity, `config.json` and
+`activity.log` (one JSON object per line, append only).
 
 ## Sharing with a friend
 
 1. In the Tailscale admin console, share the `tailshare` machine with them.
 2. Allow shared users onto port 443 only, e.g. in the policy file:
    `{"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["443"]}`
-3. Add their login to `access` in the config and reload.
-4. They open `https://tailshare.<your-tailnet>.ts.net`.
+3. They open `https://tailshare.<your-tailnet>.ts.net` once. They show up on the
+   admin Status page with their `id:`; add it to `access` and reload.
 
-The server logs each new identity it sees (`identity login=...`), which shows the
-login name to put in the config.
+If someone has access but the policy blocks them, the server logs a warning and
+the Status page marks them "blocked by tailnet policy". It works this out from the
+access rules Tailscale sends the node, so no API key is needed.
+
+`kill -USR1 <pid>` dumps the peers and access rules the node currently sees.
 
 ## Dev mode
 
