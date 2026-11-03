@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"mime"
@@ -188,10 +189,32 @@ func (s *Server) download(w http.ResponseWriter, r *http.Request, c shareCtx) {
 	h.Set("Content-Type", "application/octet-stream")
 	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": st.Name()}))
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	if r.Header.Get("Range") == "" {
-		activity(r, "download", c.sh.Name, p)
+	cw := &countingWriter{ResponseWriter: w}
+	start := time.Now()
+	http.ServeContent(cw, r, "", st.ModTime(), f)
+
+	// Players and resumed downloads send many small Range requests; only
+	// whole-file requests and sizeable ranges are worth a log line.
+	if r.Header.Get("Range") != "" && cw.n < 1<<20 {
+		return
 	}
-	http.ServeContent(w, r, "", st.ModTime(), f)
+	secs := time.Since(start).Seconds()
+	detail := fmt.Sprintf("%s (%d of %d bytes in %.1fs, %.1f MB/s)", p, cw.n, st.Size(), secs, float64(cw.n)/1e6/max(secs, 0.001))
+	if cw.n < st.Size() && r.Header.Get("Range") == "" {
+		detail += " incomplete"
+	}
+	activity(r, "download", c.sh.Name, detail)
+}
+
+type countingWriter struct {
+	http.ResponseWriter
+	n int64
+}
+
+func (c *countingWriter) Write(b []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(b)
+	c.n += int64(n)
+	return n, err
 }
 
 func (s *Server) mkdir(w http.ResponseWriter, r *http.Request, c shareCtx) {
