@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"tailscale.com/client/local"
+	"tailscale.com/tailcfg"
 )
 
 type User struct {
@@ -37,8 +38,23 @@ func (t Tailscale) Resolve(ctx context.Context, remoteAddr string) (User, error)
 		ID:      int64(w.UserProfile.ID),
 		Login:   w.UserProfile.LoginName,
 		Display: w.UserProfile.DisplayName,
-		Node:    strings.TrimSuffix(w.Node.Name, "."),
+		Node:    nodeName(w.Node),
 	}, nil
+}
+
+// nodeName falls back for devices shared in from another tailnet, which
+// arrive without a MagicDNS name.
+func nodeName(n *tailcfg.Node) string {
+	if name := strings.TrimSuffix(n.Name, "."); name != "" {
+		return name
+	}
+	if h := n.Hostinfo.Hostname(); n.Hostinfo.Valid() && h != "" {
+		return h
+	}
+	if len(n.Addresses) > 0 {
+		return n.Addresses[0].Addr().String()
+	}
+	return "unknown"
 }
 
 // Fixed is for -dev mode only, which binds to loopback.
