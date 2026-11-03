@@ -131,6 +131,9 @@ Each share gets a hidden `.tailshare/` folder: unfinished uploads, trash (kept 3
 days, restorable from the admin Trash page), `owners.json` (who uploaded what)
 and cached thumbnails (remade after 60 days; read-only shares don't
 cache).
+Only the shared folder itself gets one, not its subfolders. When a share is
+removed or moved to another folder, the old folder's `.tailshare/` is deleted,
+trash included (the app warns first). The folder's own files are never touched.
 The state directory holds the Tailscale node identity, `config.json` and
 `activity.log` (one JSON object per line, append only).
 

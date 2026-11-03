@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,10 +121,36 @@ func (s *Server) Load(cfg *config.Config) {
 	old := s.shares
 	s.cfg, s.shares = cfg, next
 	s.mu.Unlock()
+	inUse := map[string]bool{}
+	for _, sc := range cfg.Shares {
+		inUse[sameDir(sc.Path)] = true
+	}
 	for _, sh := range old {
 		sh.Close()
+		// Only on a live change: a share removed while the server was down
+		// leaves its folder alone, since we can't tell it apart from one
+		// that's merely offline.
+		if !inUse[sameDir(sh.Dir())] {
+			if err := store.RemoveMeta(sh.Dir()); err != nil {
+				log.Printf("cleaning up %s: %v", sh.Dir(), err)
+			} else {
+				log.Printf("removed tailshare data from %s (no longer shared)", sh.Dir())
+			}
+		}
 	}
 	log.Printf("loaded %d share(s)", len(next))
+}
+
+// sameDir normalises a folder path so two spellings of it compare equal.
+func sameDir(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	}
+	p = filepath.Clean(p)
+	if runtime.GOOS == "windows" {
+		p = strings.ToLower(p)
+	}
+	return p
 }
 
 func (s *Server) Housekeep(ctx context.Context) {

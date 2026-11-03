@@ -68,6 +68,23 @@ func Open(name, dir string, writable bool) (*Share, error) {
 
 func (s *Share) Close() error { return s.root.Close() }
 
+func (s *Share) Dir() string { return s.dir }
+
+// RemoveMeta deletes a folder's .tailshare (unfinished uploads, trash,
+// owners, thumbnails) once it no longer backs any share. Scoped to the
+// folder, so a planted symlink can't point the removal elsewhere.
+func RemoveMeta(dir string) error {
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer r.Close()
+	return r.RemoveAll(metaDir)
+}
+
 // mapErr hides OS detail (including "path escapes from parent", which is
 // what os.Root returns for a symlink out of the share) behind stable errors.
 func mapErr(err error) error {

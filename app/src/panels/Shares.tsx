@@ -194,6 +194,16 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
   };
 
   const shareState = (name: string) => data.status.shares.find((s) => s.name === name);
+  // By folder, so it still finds the share while it's being renamed.
+  const trashIn = (path: string) => data.status.shares.find((s) => s.path === path)?.trashCount ?? 0;
+  // The server deletes a folder's .tailshare (trash, unfinished uploads)
+  // once no share uses it.
+  const leaveWarning = (path: string) => {
+    const n = trashIn(path);
+    return n > 0
+      ? ` The ${n} item${n === 1 ? "" : "s"} in its trash will be deleted for good, along with unfinished uploads.`
+      : " Unfinished uploads into it are discarded.";
+  };
 
   return (
     <div className="editor">
@@ -220,7 +230,8 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
               <button
                 className="danger"
                 onClick={async () => {
-                  if (await ask(`Stop sharing "${s.name}"? The files stay where they are.`, { title: "Remove share", kind: "warning" }))
+                  const msg = `Stop sharing "${s.name}"? Its files stay where they are.` + leaveWarning(s.path);
+                  if (await ask(msg, { title: "Remove share", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" }))
                     edit((d) => d.shares.splice(i, 1));
                 }}
               >
@@ -229,7 +240,18 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
             </div>
             <div className="row">
               <code className="grow">{s.path}</code>
-              <button onClick={() => setPicking({ index: i, start: s.path })}>Change folder</button>
+              <button
+                onClick={async () => {
+                  if (trashIn(s.path) > 0) {
+                    const msg = `Move "${s.name}" to another folder?` + leaveWarning(s.path);
+                    if (!(await ask(msg, { title: "Change folder", kind: "warning", okLabel: "Choose folder", cancelLabel: "Cancel" })))
+                      return;
+                  }
+                  setPicking({ index: i, start: s.path });
+                }}
+              >
+                Change folder
+              </button>
             </div>
 
             <AccessTable
@@ -321,10 +343,12 @@ function AccessTable({
                   <div>{labelFor(people, a)}</div>
                   <div className="dim small">admin</div>
                 </td>
-                <td colSpan={4} className="small">
-                  Owner: full control{share.readOnly ? " (read-only share)" : ""}, no limit. Admins always have this on
-                  every share.
+                <td className="small" title="Admins always have full control of every share">
+                  Owner: full control{share.readOnly ? " (read-only share)" : ""}
                 </td>
+                <td className="small dim">No limit</td>
+                <td className="small dim">Never expires</td>
+                <td />
               </tr>
             ))}
             {keys.map((k) => {
