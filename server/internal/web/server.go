@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -198,7 +199,15 @@ func (s *Server) Handler() http.Handler {
 	s.fileRoutes(mux)
 	s.adminRoutes(mux)
 	s.adminConfigRoutes(mux)
-	return s.guard(mux)
+	// WebDAV uses methods (PROPFIND, MOVE...) the mux's method patterns
+	// can't express next to "GET /", so it's split off first.
+	return s.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, davPrefix) || r.URL.Path+"/" == davPrefix {
+			s.dav(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 }
 
 type ctxKey struct{}

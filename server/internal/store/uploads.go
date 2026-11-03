@@ -163,6 +163,17 @@ func (s *Share) WriteChunk(id string, owner int64, offset int64, r io.Reader) (i
 // name. Without replace, a name clash picks "name (n).ext"; with replace,
 // the existing file goes to trash first.
 func (s *Share) CompleteUpload(id string, owner int64, replace bool, by string) (string, error) {
+	return s.complete(id, owner, replace, false, by)
+}
+
+// CompleteUploadExact is CompleteUpload for clients that need the exact
+// name (a mounted drive): a clash is ErrExists instead of a new name.
+func (s *Share) CompleteUploadExact(id string, owner int64, replace bool, by string) error {
+	_, err := s.complete(id, owner, replace, true, by)
+	return err
+}
+
+func (s *Share) complete(id string, owner int64, replace, exact bool, by string) (string, error) {
 	u, err := s.get(id, owner)
 	if err != nil {
 		return "", err
@@ -196,7 +207,7 @@ func (s *Share) CompleteUpload(id string, owner int64, replace bool, by string) 
 
 	for n := 1; ; n++ {
 		err = s.placeNoReplace(part, target)
-		if !errors.Is(err, ErrExists) || n > maxNumbered {
+		if exact || !errors.Is(err, ErrExists) || n > maxNumbered {
 			break
 		}
 		name = numbered(u.Name, n)

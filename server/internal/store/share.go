@@ -238,6 +238,50 @@ func (s *Share) Rename(from, newDir, newName string) error {
 	return nil
 }
 
+// RenameReplace is Rename that first moves an existing file at the
+// destination to the trash. Editors save by writing a temporary file and
+// renaming it over the original, so a mounted drive needs this.
+func (s *Share) RenameReplace(from, newDir, newName, by string) error {
+	dst, err := cleanRel(newDir)
+	if err != nil {
+		return err
+	}
+	if err := validName(newName); err != nil {
+		return err
+	}
+	src, err := cleanRel(from)
+	if err != nil {
+		return err
+	}
+	target := join(dst, newName)
+	if target != src {
+		if st, err := s.root.Lstat(target); err == nil {
+			if st.IsDir() {
+				return ErrIsDir
+			}
+			if _, err := s.root.Lstat(src); err != nil {
+				return mapErr(err)
+			}
+			if err := s.toTrash(target, by); err != nil {
+				return err
+			}
+		}
+	}
+	return s.Rename(from, newDir, newName)
+}
+
+// SetModTime sets a file's modification time, so copies keep their dates.
+func (s *Share) SetModTime(p string, t time.Time) error {
+	rel, err := cleanRel(p)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return ErrBadPath
+	}
+	return mapErr(s.root.Chtimes(rel, t, t))
+}
+
 func randID(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)

@@ -387,6 +387,44 @@ func human(n int64) string {
 	return fmt.Sprintf("%.0f %s", f, units[i])
 }
 
+// spaceProblem says why size more bytes can't be uploaded by user, or "".
+// Unfinished uploads count as already used.
+func (s *Server) spaceProblem(c shareCtx, user int64, size int64) string {
+	pendingAll, pendingMine := c.sh.Pending(user)
+	if c.grant.Limited {
+		used := c.sh.Usage(user) + pendingMine
+		if used+size > c.grant.QuotaBytes {
+			return fmt.Sprintf("over your storage limit (%s of %s used)", human(used), human(c.grant.QuotaBytes))
+		}
+	}
+	if free, err := c.sh.FreeBytes(); err == nil && free-pendingAll-size < s.minFree() {
+		return "not enough free space on the server"
+	}
+	return ""
+}
+
+// spaceLeft is how much user could still upload to the share.
+func (s *Server) spaceLeft(c shareCtx, user int64) int64 {
+	pendingAll, pendingMine := c.sh.Pending(user)
+	left := int64(-1)
+	if free, err := c.sh.FreeBytes(); err == nil {
+		left = max(0, free-pendingAll-s.minFree())
+	}
+	if c.grant.Limited {
+		q := max(0, c.grant.QuotaBytes-c.sh.Usage(user)-pendingMine)
+		if left < 0 || q < left {
+			left = q
+		}
+	}
+	return left
+}
+
+func (s *Server) minFree() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg.MinFreeBytes()
+}
+
 func (s *Server) uploadCreate(w http.ResponseWriter, r *http.Request, c shareCtx) {
 	var in struct {
 		Dir, Name string
@@ -396,19 +434,8 @@ func (s *Server) uploadCreate(w http.ResponseWriter, r *http.Request, c shareCtx
 		return
 	}
 	u := userOf(r)
-	pendingAll, pendingMine := c.sh.Pending(u.ID)
-	if c.grant.Limited {
-		used := c.sh.Usage(u.ID) + pendingMine
-		if used+in.Size > c.grant.QuotaBytes {
-			httpError(w, http.StatusInsufficientStorage, fmt.Sprintf("over your storage limit (%s of %s used)", human(used), human(c.grant.QuotaBytes)))
-			return
-		}
-	}
-	s.mu.RLock()
-	minFree := s.cfg.MinFreeBytes()
-	s.mu.RUnlock()
-	if free, err := c.sh.FreeBytes(); err == nil && free-pendingAll-in.Size < minFree {
-		httpError(w, http.StatusInsufficientStorage, "not enough free space on the server")
+	if msg := s.spaceProblem(c, u.ID, in.Size); msg != "" {
+		httpError(w, http.StatusInsufficientStorage, msg)
 		return
 	}
 	info, err := c.sh.CreateUpload(u.ID, in.Dir, in.Name, in.Size)
