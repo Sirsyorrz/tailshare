@@ -1,6 +1,8 @@
 package store
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -167,7 +169,7 @@ func TestRenameAndDelete(t *testing.T) {
 	s, dir := newShare(t)
 	doUpload(t, s, 1, "a.txt", "x", false)
 	doUpload(t, s, 1, "b.txt", "y", false)
-	if err := s.Mkdir("", "sub"); err != nil {
+	if err := s.Mkdir("", "sub", 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Rename("a.txt", "", "b.txt"); !errors.Is(err, ErrExists) {
@@ -187,5 +189,111 @@ func TestRenameAndDelete(t *testing.T) {
 	}
 	if err := s.Delete("", "tester"); err == nil {
 		t.Error("deleted share root")
+	}
+}
+
+func TestOwnersFollowRenameDeleteRestore(t *testing.T) {
+	s, _ := newShare(t)
+	if err := s.Mkdir("", "mine", 5); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := s.CreateUpload(5, "mine", "a.bin", 3)
+	s.WriteChunk(u.ID, 5, 0, strings.NewReader("abc"))
+	if _, err := s.CompleteUpload(u.ID, 5, false, "five"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage(5) != 3 || !s.OwnsAll("mine", 5) || s.OwnsAll("mine", 6) {
+		t.Fatalf("ownership after upload: usage=%d", s.Usage(5))
+	}
+	if err := s.Rename("mine", "", "moved"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.OwnsAll("moved", 5) || s.OwnsAll("mine", 5) {
+		t.Fatal("ownership did not follow rename")
+	}
+	if err := s.Delete("moved", "five"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage(5) != 0 {
+		t.Fatal("deleted files still count toward usage")
+	}
+	items, _ := s.ListTrash()
+	if len(items) != 1 || items[0].Path != "moved" || !items[0].Dir || items[0].Size != 3 {
+		t.Fatalf("trash: %+v", items)
+	}
+	s.Mkdir("", "moved", 9)
+	got, err := s.RestoreTrash(items[0].ID)
+	if err != nil || got != "moved (1)" {
+		t.Fatalf("restore: %q %v", got, err)
+	}
+	if !s.OwnsAll("moved (1)", 5) || s.Usage(5) != 3 {
+		t.Fatal("ownership not restored")
+	}
+	if items, _ := s.ListTrash(); len(items) != 0 {
+		t.Fatal("restored item still in trash")
+	}
+}
+
+func TestOwnsAllNeedsEverythingInside(t *testing.T) {
+	s, dir := newShare(t)
+	s.Mkdir("", "d", 5)
+	os.WriteFile(filepath.Join(dir, "d", "host-copied.txt"), []byte("x"), 0o644)
+	if s.OwnsAll("d", 5) {
+		t.Error("folder with someone else's file counted as owned")
+	}
+}
+
+func TestTrashIDValidated(t *testing.T) {
+	s, _ := newShare(t)
+	for _, id := range []string{"../owners", "..", "1-zz", ""} {
+		if _, err := s.RestoreTrash(id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%q: %v", id, err)
+		}
+	}
+}
+
+func TestPendingCountsUnfinished(t *testing.T) {
+	s, _ := newShare(t)
+	u, _ := s.CreateUpload(5, "", "a", 10)
+	s.WriteChunk(u.ID, 5, 0, strings.NewReader("abcd"))
+	s.CreateUpload(6, "", "b", 7)
+	all, mine := s.Pending(5)
+	if all != 6+7 || mine != 10 {
+		t.Fatalf("all=%d mine=%d", all, mine)
+	}
+}
+
+func TestZip(t *testing.T) {
+	s, dir := newShare(t)
+	os.MkdirAll(filepath.Join(dir, "f", "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "f", "a.txt"), []byte("aaa"), 0o644)
+	os.WriteFile(filepath.Join(dir, "f", "sub", "b.txt"), []byte("bb"), 0o644)
+	os.Symlink("/etc/passwd", filepath.Join(dir, "f", "link"))
+
+	var buf bytes.Buffer
+	n, err := s.WriteZip(&buf, "f")
+	if err != nil || n != 5 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	want := "f/ f/a.txt f/sub/ f/sub/b.txt"
+	if strings.Join(names, " ") != want {
+		t.Fatalf("got %v", names)
+	}
+
+	buf.Reset()
+	s.WriteZip(&buf, "")
+	zr, _ = zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	for _, f := range zr.File {
+		if strings.Contains(f.Name, metaDir) {
+			t.Fatalf("zip of share root includes %s", f.Name)
+		}
 	}
 }

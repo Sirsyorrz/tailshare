@@ -3,14 +3,11 @@ package store
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -31,10 +28,12 @@ const (
 // the OS confines to the folder (no "..", no symlinks pointing outside).
 type Share struct {
 	Name string
+	dir  string
 	root *os.Root
 
 	mu      sync.Mutex
 	uploads map[string]*upload
+	owners  map[string]Owner
 }
 
 type Entry struct {
@@ -42,6 +41,7 @@ type Entry struct {
 	Dir      bool      `json:"dir"`
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
+	Owner    int64     `json:"-"`
 }
 
 func Open(name, dir string, writable bool) (*Share, error) {
@@ -49,7 +49,7 @@ func Open(name, dir string, writable bool) (*Share, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Share{Name: name, root: r, uploads: map[string]*upload{}}
+	s := &Share{Name: name, dir: dir, root: r, uploads: map[string]*upload{}, owners: map[string]Owner{}}
 	if writable {
 		if err := r.MkdirAll(uploadsDir, 0o700); err != nil {
 			r.Close()
@@ -60,6 +60,7 @@ func Open(name, dir string, writable bool) (*Share, error) {
 			return nil, fmt.Errorf("share %s: %w", name, err)
 		}
 		s.loadUploads()
+		s.loadOwners()
 	}
 	return s, nil
 }
@@ -121,7 +122,11 @@ func (s *Share) List(p string) ([]Entry, error) {
 		if !info.IsDir() && !info.Mode().IsRegular() {
 			continue
 		}
-		out = append(out, Entry{Name: de.Name(), Dir: info.IsDir(), Size: info.Size(), Modified: info.ModTime()})
+		e := Entry{Name: de.Name(), Dir: info.IsDir(), Size: info.Size(), Modified: info.ModTime()}
+		if o, ok := s.ownerOf(join(rel, de.Name())); ok {
+			e.Owner = o.ID
+		}
+		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Dir != out[j].Dir {
@@ -171,7 +176,7 @@ func (s *Share) dirExists(rel string) error {
 	return nil
 }
 
-func (s *Share) Mkdir(dir, name string) error {
+func (s *Share) Mkdir(dir, name string, owner int64) error {
 	rel, err := cleanRel(dir)
 	if err != nil {
 		return err
@@ -182,7 +187,12 @@ func (s *Share) Mkdir(dir, name string) error {
 	if err := s.dirExists(rel); err != nil {
 		return err
 	}
-	return mapErr(s.root.Mkdir(join(rel, name), 0o775))
+	p := join(rel, name)
+	if err := s.root.Mkdir(p, 0o775); err != nil {
+		return mapErr(err)
+	}
+	s.setOwner(p, Owner{ID: owner})
+	return nil
 }
 
 // Rename moves a file or folder within the share. newDir and newName
@@ -220,62 +230,11 @@ func (s *Share) Rename(from, newDir, newName string) error {
 	if _, err := s.root.Lstat(target); err == nil {
 		return ErrExists
 	}
-	return mapErr(s.root.Rename(src, target))
-}
-
-type trashRecord struct {
-	Path string    `json:"path"`
-	By   string    `json:"by"`
-	At   time.Time `json:"at"`
-}
-
-// Delete moves a file or folder into the share's trash.
-func (s *Share) Delete(p, by string) error {
-	rel, err := cleanRel(p)
-	if err != nil {
-		return err
-	}
-	if rel == "." {
-		return ErrBadPath
-	}
-	if _, err := s.root.Lstat(rel); err != nil {
+	if err := s.root.Rename(src, target); err != nil {
 		return mapErr(err)
 	}
-	return s.toTrash(rel, by)
-}
-
-func (s *Share) toTrash(rel, by string) error {
-	id := strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + randID(4)
-	slot := trashDir + "/" + id
-	if err := s.root.Mkdir(slot, 0o700); err != nil {
-		return mapErr(err)
-	}
-	if err := s.root.Rename(rel, slot+"/"+path.Base(rel)); err != nil {
-		s.root.Remove(slot)
-		return mapErr(err)
-	}
-	rec, _ := json.Marshal(trashRecord{Path: rel, By: by, At: time.Now()})
-	return s.root.WriteFile(slot+".json", rec, 0o600)
-}
-
-// PurgeTrash permanently removes trash entries older than maxAge.
-func (s *Share) PurgeTrash(maxAge time.Duration) {
-	des, err := fs.ReadDir(s.root.FS(), trashDir)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-maxAge)
-	for _, de := range des {
-		if !de.IsDir() {
-			continue
-		}
-		info, err := de.Info()
-		if err != nil || info.ModTime().After(cutoff) {
-			continue
-		}
-		s.root.RemoveAll(trashDir + "/" + de.Name())
-		s.root.Remove(trashDir + "/" + de.Name() + ".json")
-	}
+	s.putOwners(s.takeOwners(src), src, target)
+	return nil
 }
 
 func randID(n int) string {

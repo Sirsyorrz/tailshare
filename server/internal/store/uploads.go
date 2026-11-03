@@ -31,11 +31,12 @@ type upload struct {
 }
 
 type UploadInfo struct {
-	ID     string `json:"id"`
-	Dir    string `json:"dir"`
-	Name   string `json:"name"`
-	Size   int64  `json:"size"`
-	Offset int64  `json:"offset"`
+	ID      string    `json:"id"`
+	Dir     string    `json:"dir"`
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+	Offset  int64     `json:"offset"`
+	Created time.Time `json:"created"`
 }
 
 func partPath(id string) string { return uploadsDir + "/" + id + ".part" }
@@ -91,7 +92,7 @@ func (s *Share) CreateUpload(owner int64, dir, name string, size int64) (UploadI
 	s.mu.Lock()
 	s.uploads[u.ID] = u
 	s.mu.Unlock()
-	return UploadInfo{ID: u.ID, Dir: rel, Name: name, Size: size}, nil
+	return UploadInfo{ID: u.ID, Dir: rel, Name: name, Size: size, Created: u.Created}, nil
 }
 
 // get returns the upload only to its owner; anyone else sees ErrNotFound so
@@ -122,7 +123,7 @@ func (s *Share) UploadStatus(id string, owner int64) (UploadInfo, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	off, err := s.offset(u)
-	return UploadInfo{ID: u.ID, Dir: u.Dir, Name: u.Name, Size: u.Size, Offset: off}, err
+	return UploadInfo{ID: u.ID, Dir: u.Dir, Name: u.Name, Size: u.Size, Offset: off, Created: u.Created}, err
 }
 
 // WriteChunk appends r at offset. Whatever arrives before a dropped
@@ -204,6 +205,7 @@ func (s *Share) CompleteUpload(id string, owner int64, replace bool, by string) 
 	if err != nil {
 		return "", err
 	}
+	s.setOwner(target, Owner{ID: u.Owner, Size: u.Size})
 	s.forget(u.ID)
 	return name, nil
 }
@@ -224,6 +226,28 @@ func (s *Share) placeNoReplace(part, target string) error {
 		return ErrExists
 	}
 	return mapErr(s.root.Rename(part, target))
+}
+
+// Pending is how many bytes unfinished uploads still expect, in total and
+// for one user. Space checks count it as already used.
+func (s *Share) Pending(user int64) (all, mine int64) {
+	s.mu.Lock()
+	ups := make([]*upload, 0, len(s.uploads))
+	for _, u := range s.uploads {
+		ups = append(ups, u)
+	}
+	s.mu.Unlock()
+	for _, u := range ups {
+		left := u.Size
+		if st, err := s.root.Stat(partPath(u.ID)); err == nil {
+			left -= st.Size()
+		}
+		all += left
+		if u.Owner == user {
+			mine += u.Size
+		}
+	}
+	return all, mine
 }
 
 func (s *Share) CancelUpload(id string, owner int64) error {
