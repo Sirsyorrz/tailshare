@@ -251,7 +251,23 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request, c shareCtx) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func gb(n int64) string { return fmt.Sprintf("%.1f GB", float64(n)/1e9) }
+// human matches the web UI's decimal units.
+func human(n int64) string {
+	f := float64(n)
+	if f < 1000 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	i := -1
+	for f >= 1000 && i < len(units)-1 {
+		f /= 1000
+		i++
+	}
+	if f < 10 {
+		return fmt.Sprintf("%.1f %s", f, units[i])
+	}
+	return fmt.Sprintf("%.0f %s", f, units[i])
+}
 
 func (s *Server) uploadCreate(w http.ResponseWriter, r *http.Request, c shareCtx) {
 	var in struct {
@@ -266,7 +282,7 @@ func (s *Server) uploadCreate(w http.ResponseWriter, r *http.Request, c shareCtx
 	if c.grant.Limited {
 		used := c.sh.Usage(u.ID) + pendingMine
 		if used+in.Size > c.grant.QuotaBytes {
-			httpError(w, http.StatusInsufficientStorage, fmt.Sprintf("over your storage limit (%s of %s used)", gb(used), gb(c.grant.QuotaBytes)))
+			httpError(w, http.StatusInsufficientStorage, fmt.Sprintf("over your storage limit (%s of %s used)", human(used), human(c.grant.QuotaBytes)))
 			return
 		}
 	}

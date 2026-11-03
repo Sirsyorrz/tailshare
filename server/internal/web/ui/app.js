@@ -7,6 +7,8 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   me: null,
+  // "files", or an admin view: "status", "activity", "trash"
+  view: "files",
   share: null,
   path: "",
   entries: [],
@@ -54,14 +56,15 @@ const shareURL = (name, rest) => `/api/shares/${encodeURIComponent(name)}/${rest
 const has = (p) => state.share && state.share.perms.includes(p);
 const joinPath = (dir, name) => (dir ? dir + "/" + name : name);
 
+// Decimal units, matching the server's messages.
 function fmtSize(n) {
-  if (n < 1024) return n + " B";
+  if (n < 1000) return Math.round(n) + " B";
   const u = ["KB", "MB", "GB", "TB"];
   let i = -1;
   do {
-    n /= 1024;
+    n /= 1000;
     i++;
-  } while (n >= 1024 && i < u.length - 1);
+  } while (n >= 1000 && i < u.length - 1);
   return n.toFixed(n < 10 ? 1 : 0) + " " + u[i];
 }
 
@@ -107,30 +110,60 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("modal-back").hidden) $("modal-cancel").click();
 });
 
-// Mirrors perm.Presets on the server; perms arrive sorted.
-const PRESETS = {
-  viewer: "download,view",
-  contributor: "download,mkdir,upload,view",
-  editor: "delete,download,mkdir,overwrite,rename,upload,view",
-  "upload only": "upload",
+// Mirrors perm.Presets on the server, largest first.
+const PRESETS = [
+  ["editor", ["view", "download", "upload", "mkdir", "overwrite", "rename", "delete"]],
+  ["contributor", ["view", "download", "upload", "mkdir"]],
+  ["viewer", ["view", "download"]],
+  ["upload only", ["upload"]],
+];
+const PERM_NAMES = {
+  view: "view",
+  download: "download",
+  upload: "upload",
+  mkdir: "new folders",
+  overwrite: "replace",
+  rename: "rename",
+  delete: "delete",
+  deleteown: "delete own",
 };
 
 function permLabel(perms) {
-  const key = perms.join(",");
-  return Object.keys(PRESETS).find((k) => PRESETS[k] === key) || perms.join(", ");
+  const preset = PRESETS.find(([, ps]) => ps.every((p) => perms.includes(p)));
+  const extras = perms.filter((p) => !(preset && preset[1].includes(p))).map((p) => PERM_NAMES[p] || p);
+  if (!preset) return extras.join(", ");
+  return [preset[0], ...extras].join(" + ");
+}
+
+async function refreshMe() {
+  try {
+    const me = await api("GET", "/api/me");
+    state.me = me;
+    if (state.share) state.share = me.shares.find((s) => s.name === state.share.name) || state.share;
+    renderShares();
+  } catch {}
+}
+
+function shareDetail(s) {
+  const parts = [permLabel(s.perms)];
+  if (s.quota) parts.push(`${fmtSize(s.used)} of ${fmtSize(s.quota)} used`);
+  if (s.expires) parts.push("until " + new Date(new Date(s.expires).getTime() - 1).toLocaleDateString());
+  return parts.join(" \u00b7 ");
 }
 
 function renderShares() {
   const ul = $("shares");
   ul.replaceChildren();
   for (const s of state.me.shares) {
-    const li = el(
-      "li",
-      { class: state.share && state.share.name === s.name ? "active" : "", onclick: () => openShare(s, "") },
-      el("span", { text: s.name }),
-      el("span", { class: "perms", text: permLabel(s.perms) }),
+    const active = state.view === "files" && state.share && state.share.name === s.name;
+    ul.append(
+      el(
+        "li",
+        { class: active ? "active" : "", onclick: () => openShare(s, "") },
+        el("span", { text: s.name }),
+        el("span", { class: "perms", text: shareDetail(s) }),
+      ),
     );
-    ul.append(li);
   }
 }
 
@@ -177,11 +210,16 @@ function renderFiles() {
         ? el("a", { href: shareURL(state.share.name, "download?path=" + encodeURIComponent(p)), download: e.name, text: e.name })
         : el("span", { text: e.name });
     const actions = el("td", { class: "actions" });
-    if (!e.dir && has("download")) {
-      actions.append(el("a", { href: shareURL(state.share.name, "download?path=" + encodeURIComponent(p)), download: e.name, text: "Download" }));
+    if (has("download")) {
+      const href = e.dir ? zipURL(p) : shareURL(state.share.name, "download?path=" + encodeURIComponent(p));
+      actions.append(el("a", { href, download: e.dir ? e.name + ".zip" : e.name, text: e.dir ? "Zip" : "Download", title: e.dir ? "Download folder as zip" : "" }));
     }
     if (has("rename")) actions.append(el("button", { text: "Rename", onclick: () => renameEntry(e) }));
-    if (has("delete")) actions.append(el("button", { class: "danger", text: "Delete", onclick: () => deleteEntry(e) }));
+    // deleteown only covers folders whose whole contents are theirs; the
+    // server has the final say and reports otherwise.
+    if (has("delete") || (has("deleteown") && e.mine)) {
+      actions.append(el("button", { class: "danger", text: "Delete", onclick: () => deleteEntry(e) }));
+    }
     tbody.append(
       el(
         "tr",
@@ -195,13 +233,24 @@ function renderFiles() {
   }
 }
 
+const zipURL = (p) => shareURL(state.share.name, "zip?path=" + encodeURIComponent(p));
+
 function renderToolbar() {
-  $("btn-upload").hidden = !has("upload");
-  $("btn-mkdir").hidden = !has("mkdir");
+  const files = state.view === "files";
+  $("btn-upload").hidden = !files || !has("upload");
+  $("btn-mkdir").hidden = !files || !has("mkdir");
+  $("btn-zip").hidden = !files || !has("view") || !has("download");
+}
+
+function showFiles() {
+  state.view = "files";
+  $("admin-view").hidden = true;
+  renderAdminNav();
 }
 
 async function openShare(s, path) {
   state.share = s;
+  showFiles();
   renderShares();
   await navigate(path);
 }
@@ -258,6 +307,7 @@ async function deleteEntry(e) {
   try {
     await api("POST", shareURL(state.share.name, "delete"), { path: joinPath(state.path, e.name) });
     refresh();
+    refreshMe();
   } catch (err) {
     status("Couldn't delete: " + err.message, true);
   }
@@ -293,6 +343,7 @@ function renderTransfers() {
           : el("button", { text: "Clear", onclick: () => clearTransfer(t) });
     ul.append(el("li", {}, el("div", { class: "tname" }, el("span", { text: t.file.name, title: t.file.name }), btn), bar, el("div", { class: "dim", text: line })));
   }
+  $("transfers-h").hidden = transfers.length === 0;
   const running = transfers.filter((t) => t.state === "uploading" || t.state === "queued").length;
   document.title = running ? `(${running}) tailshare` : "tailshare";
 }
@@ -425,6 +476,7 @@ async function runUpload(t) {
   localStorage.removeItem(resumeKey(t));
   t.finalName = res.name;
   t.state = "done";
+  refreshMe();
   if (state.share && state.share.name === t.share && state.path === t.dir) refresh();
 }
 
@@ -486,6 +538,195 @@ function setupDrop() {
   });
 }
 
+// Admin views. Only offered when the server says this login is an admin;
+// the server enforces it regardless.
+
+function table(headers, rows, numeric = []) {
+  const head = el("tr", {}, ...headers.map((h, i) => el("th", { class: numeric.includes(i) ? "num" : "", text: h })));
+  const body = rows.map((cells) =>
+    el(
+      "tr",
+      {},
+      ...cells.map((c, i) => {
+        const td = el("td", { class: numeric.includes(i) ? "num" : "" });
+        if (c instanceof Node) td.append(c);
+        else td.textContent = c ?? "";
+        return td;
+      }),
+    ),
+  );
+  return el("table", { class: "files" }, el("thead", {}, head), el("tbody", {}, ...body));
+}
+
+const tag = (text, cls) => el("span", { class: cls, text });
+
+function renderAdminNav() {
+  const show = state.me && state.me.admin;
+  $("admin-h").hidden = !show;
+  const ul = $("admin");
+  ul.hidden = !show;
+  if (!show) return;
+  ul.replaceChildren(
+    ...[
+      ["status", "Status"],
+      ["activity", "Activity"],
+      ["trash", "Trash"],
+    ].map(([v, label]) => el("li", { class: state.view === v ? "active" : "", onclick: () => showAdmin(v) }, el("span", { text: label }))),
+  );
+}
+
+async function showAdmin(view) {
+  state.view = view;
+  $("files").hidden = true;
+  $("empty").hidden = true;
+  const box = $("admin-view");
+  box.hidden = false;
+  box.replaceChildren(el("div", { class: "dim", text: "Loading\u2026" }));
+  $("crumbs").replaceChildren(el("span", { text: { status: "Status", activity: "Activity", trash: "Trash" }[view] }));
+  renderToolbar();
+  renderShares();
+  renderAdminNav();
+  try {
+    if (view === "status") await renderStatus(box);
+    if (view === "activity") await renderActivity(box);
+    if (view === "trash") await renderTrash(box);
+    status("");
+  } catch (e) {
+    box.replaceChildren(el("div", { class: "bad", text: "Couldn't load: " + e.message }));
+  }
+}
+
+async function renderStatus(box) {
+  const st = await api("GET", "/api/admin/status");
+  const people = st.peers
+    .filter((p) => p.hasAccess || p.external)
+    .map((p) => {
+      let conn;
+      if (!p.canReach) conn = tag(p.hasAccess ? "blocked by tailnet policy" : "blocked", "bad");
+      else conn = tag(p.online ? "can connect" : "can connect (offline)", "ok");
+      const access = p.hasAccess ? "yes" : el("span", {}, tag("none yet ", "dim"), el("code", { text: "id:" + p.userId }));
+      return [p.login, p.node, p.external ? "shared in" : "your tailnet", access, conn];
+    });
+  const blocked = st.peers.some((p) => p.hasAccess && !p.canReach);
+  fill(
+    box,
+    el("h3", { text: "People" }),
+    st.policyKnown
+      ? people.length
+        ? table(["Person", "Device", "From", "Access", "Connection"], people)
+        : el("div", { class: "dim", text: "Nobody with access and nobody has accepted a share yet." })
+      : el("div", { class: "dim", text: "Policy check unavailable (dev mode)." }),
+    blocked
+      ? el(
+          "p",
+          { class: "dim" },
+          "Someone with access is blocked. Add a grant to your tailnet policy: ",
+          el("code", { text: '{"src": ["autogroup:shared"], "dst": ["<this node>"], "ip": ["443"]}' }),
+        )
+      : null,
+    el("h3", { text: "Shares" }),
+    table(
+      ["Share", "Folder", "Free space", "In trash", "State"],
+      st.shares.map((s) => [
+        s.name,
+        el("code", { text: s.path }),
+        s.online ? fmtSize(s.freeBytes) : "",
+        String(s.trashCount),
+        s.online ? (s.readOnly ? "read-only" : "ok") : tag("folder unavailable", "bad"),
+      ]),
+      [2, 3],
+    ),
+    el("p", { class: "dim", text: `Uploads are refused if they would leave less than ${fmtSize(st.minFreeBytes)} free.` }),
+  );
+}
+
+const fill = (box, ...nodes) => box.replaceChildren(...nodes.filter(Boolean));
+
+function speed(e) {
+  if (!e.bytes || !e.seconds) return "";
+  return fmtSize(e.bytes / Math.max(e.seconds, 0.001)) + "/s";
+}
+
+async function renderActivity(box) {
+  const entries = await api("GET", "/api/admin/activity?n=300");
+  box.replaceChildren(
+    el("div", { class: "row" }, el("button", { text: "Refresh", onclick: () => showAdmin("activity") })),
+    entries.length
+      ? table(
+          ["When", "Who", "Action", "Share", "Path", "Size", "Speed", ""],
+          entries.map((e) => [
+            fmtDate(e.time),
+            e.login + (e.external ? " (shared in)" : ""),
+            e.action,
+            e.share,
+            e.to ? `${e.path} \u2192 ${e.to}` : e.path || "",
+            e.bytes ? fmtSize(e.bytes) : "",
+            speed(e),
+            e.note || "",
+          ]),
+          [5, 6],
+        )
+      : el("div", { class: "dim", text: "No activity yet." }),
+  );
+}
+
+async function renderTrash(box) {
+  const st = await api("GET", "/api/admin/status");
+  const sections = [];
+  for (const s of st.shares.filter((x) => x.online)) {
+    const items = await api("GET", `/api/admin/shares/${encodeURIComponent(s.name)}/trash`);
+    sections.push(el("h3", { text: s.name }));
+    if (!items.length) {
+      sections.push(el("div", { class: "dim", text: "Empty." }));
+      continue;
+    }
+    const base = `/api/admin/shares/${encodeURIComponent(s.name)}/trash/`;
+    sections.push(
+      table(
+        ["Path", "Deleted by", "When", "Size", ""],
+        items.map((it) => [
+          (it.dir ? "\u25B8 " : "") + it.path,
+          it.by,
+          fmtDate(it.at),
+          fmtSize(it.size),
+          el(
+            "span",
+            { class: "actions" },
+            el("button", {
+              text: "Restore",
+              onclick: async () => {
+                try {
+                  const r = await api("POST", base + it.id + "/restore");
+                  await showAdmin("trash");
+                  status(`Restored to ${s.name}/${r.path}`);
+                } catch (e) {
+                  status("Couldn't restore: " + e.message, true);
+                }
+              },
+            }),
+            el("button", {
+              class: "danger",
+              text: "Delete forever",
+              onclick: async () => {
+                const ok = await modal({ title: `Permanently delete ${it.path}?`, text: "This can't be undone.", ok: "Delete forever", danger: true });
+                if (!ok) return;
+                try {
+                  await api("DELETE", base + it.id);
+                  showAdmin("trash");
+                } catch (e) {
+                  status("Couldn't delete: " + e.message, true);
+                }
+              },
+            }),
+          ),
+        ]),
+        [3],
+      ),
+    );
+  }
+  box.replaceChildren(el("p", { class: "dim", text: "Deleted and replaced files are kept for 30 days." }), ...sections);
+}
+
 async function init() {
   $("btn-upload").onclick = () => $("file-input").click();
   $("file-input").onchange = (e) => {
@@ -493,6 +734,10 @@ async function init() {
     e.target.value = "";
   };
   $("btn-mkdir").onclick = mkdir;
+  $("btn-zip").onclick = () => {
+    const a = el("a", { href: zipURL(state.path), download: "" });
+    a.click();
+  };
   setupDrop();
 
   try {
@@ -504,6 +749,7 @@ async function init() {
   const u = state.me.user;
   $("whoami").textContent = (u.display && u.display !== u.login ? `${u.display} (${u.login})` : u.login) + ` on ${u.node}`;
   renderShares();
+  renderAdminNav();
 
   const [shareName, ...rest] = decodeURIComponent(location.hash.slice(1)).split("/");
   const s = state.me.shares.find((x) => x.name === shareName) || (state.me.shares.length === 1 ? state.me.shares[0] : null);
