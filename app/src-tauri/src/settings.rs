@@ -15,6 +15,22 @@ pub struct Settings {
     pub roots: Vec<String>,
     /// Servers added by hand, e.g. ones the scan can't see.
     pub servers: Vec<String>,
+    /// Shares mounted as drives, remembered with where they go.
+    pub drives: Vec<DriveSpec>,
+    /// Most the drive cache may use on disk, in GB.
+    pub cache_gb: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DriveSpec {
+    pub base: String,
+    pub share: String,
+    /// Drive letter ("T:") on Windows, a folder elsewhere.
+    pub target: String,
+    pub read_only: bool,
+    /// Mount again when the app starts.
+    pub auto: bool,
 }
 
 impl Default for Settings {
@@ -32,6 +48,8 @@ impl Default for Settings {
                 .map(|h| vec![h.to_string_lossy().into_owned()])
                 .unwrap_or_default(),
             servers: vec![],
+            drives: vec![],
+            cache_gb: 20,
         }
     }
 }

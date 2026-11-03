@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm run server && npm run dev",
-    "beforeBuildCommand": "npm run server && npm run build"
+    "beforeDevCommand": "npm run server && npm run rclone && npm run dev",
+    "beforeBuildCommand": "npm run server && npm run rclone && npm run build"
   },
   "app": {
     "windows": [
@@ -33,7 +33,8 @@
     ],
     "createUpdaterArtifacts": true,
     "externalBin": [
-      "binaries/tailshare-server"
+      "binaries/tailshare-server",
+      "binaries/rclone"
     ]
   },
   "plugins": {

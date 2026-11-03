@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use url::Url;
 
-fn client() -> &'static reqwest::Client {
+pub(crate) fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         if rustls::crypto::CryptoProvider::get_default().is_none() {

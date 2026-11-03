@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",
-    "server": "node scripts/build-server.mjs"
+    "server": "node scripts/build-server.mjs",
+    "rclone": "node scripts/fetch-rclone.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

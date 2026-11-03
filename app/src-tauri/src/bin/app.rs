@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tailshare::{api, background, host, settings, tailnet};
+use tailshare::{api, background, drives, host, settings, tailnet};
 use tauri::{AppHandle, Manager, RunEvent, State};
 
 type Res<T> = Result<T, String>;
@@ -143,6 +143,44 @@ async fn host_stop(h: State<'_, host::Host>) -> Res<()> {
     .map_err(err)
 }
 
+#[tauri::command]
+async fn drives_state(d: State<'_, drives::Drives>) -> Res<drives::DrivesState> {
+    Ok(d.state().await)
+}
+
+#[tauri::command]
+fn drive_suggest(share: String) -> String {
+    let taken: Vec<String> = settings::load().drives.into_iter().map(|d| d.target).collect();
+    drives::suggest_target(&share, &taken)
+}
+
+/// Mounts and remembers the drive, so it comes back when the app starts.
+#[tauri::command]
+async fn drive_mount(spec: settings::DriveSpec, d: State<'_, drives::Drives>) -> Res<()> {
+    let s = settings::load();
+    if s.drives.iter().any(|x| {
+        x.target == spec.target && (x.base != spec.base || x.share != spec.share) && x.auto
+    }) {
+        return Err(format!("{} is already used by another drive", spec.target));
+    }
+    d.mount(&spec, s.cache_gb).await.map_err(err)?;
+    let mut s = settings::load();
+    s.drives.retain(|x| !(x.base == spec.base && x.share == spec.share));
+    s.drives.push(settings::DriveSpec { auto: true, ..spec });
+    settings::save(&s).map_err(err)
+}
+
+#[tauri::command]
+async fn drive_unmount(base: String, share: String, d: State<'_, drives::Drives>) -> Res<()> {
+    let mut s = settings::load();
+    let Some(spec) = s.drives.iter_mut().find(|x| x.base == base && x.share == share) else {
+        return Ok(());
+    };
+    d.unmount(&spec.target).await.map_err(err)?;
+    spec.auto = false;
+    settings::save(&s).map_err(err)
+}
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer hard-crashes with a Wayland protocol error on
     // NVIDIA. Must be set before GTK initialises.
@@ -157,6 +195,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_opener::init())
         .manage(host::Host::default())
+        .manage(drives::Drives::default())
         .setup(|app| {
             let s = settings::load();
             if s.background {
@@ -176,6 +215,18 @@ fn main() {
                     }
                 });
             }
+            let auto: Vec<_> = s.drives.iter().filter(|d| d.auto).cloned().collect();
+            if !auto.is_empty() {
+                let d = app.state::<drives::Drives>().inner().clone();
+                let gb = s.cache_gb;
+                tauri::async_runtime::spawn(async move {
+                    for spec in auto {
+                        if let Err(e) = d.mount(&spec, gb).await {
+                            eprintln!("mounting {} at {}: {e}", spec.share, spec.target);
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -188,6 +239,10 @@ fn main() {
             host_start,
             host_stop,
             set_background,
+            drives_state,
+            drive_suggest,
+            drive_mount,
+            drive_unmount,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -196,6 +251,7 @@ fn main() {
         // Background hosting belongs to the OS service, not to this process.
         if let RunEvent::Exit = event {
             handle.state::<host::Host>().stop();
+            handle.state::<drives::Drives>().shutdown();
         }
     });
 }

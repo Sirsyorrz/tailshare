@@ -1,5 +1,6 @@
 pub mod api;
 pub mod background;
+pub mod drives;
 pub mod host;
 pub mod settings;
 pub mod tailnet;
