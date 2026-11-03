@@ -17,9 +17,12 @@ const (
 	Overwrite
 	Rename
 	Delete
+	// DeleteOwn allows deleting files and folders this user uploaded or
+	// created (folders only when everything inside is theirs too).
+	DeleteOwn
 )
 
-const writeMask = Upload | Mkdir | Overwrite | Rename | Delete
+const writeMask = Upload | Mkdir | Overwrite | Rename | Delete | DeleteOwn
 
 var names = map[string]Set{
 	"view":      View,
@@ -29,6 +32,7 @@ var names = map[string]Set{
 	"overwrite": Overwrite,
 	"rename":    Rename,
 	"delete":    Delete,
+	"deleteown": DeleteOwn,
 }
 
 var Presets = map[string]Set{
@@ -39,6 +43,8 @@ var Presets = map[string]Set{
 }
 
 func (s Set) Has(p Set) bool { return s&p == p }
+
+func (s Set) CanDeleteSome() bool { return s&(Delete|DeleteOwn) != 0 }
 
 func (s Set) ReadOnly() Set { return s &^ writeMask }
 
