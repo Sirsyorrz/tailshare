@@ -103,36 +103,52 @@ func (s *Server) WatchReach(ctx context.Context) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
-		peers, err := s.opt.Reach(ctx)
-		if err != nil {
-			log.Printf("policy check: %v", err)
-		}
-		for _, p := range peers {
-			key := p.Login + "|" + p.Node
-			state := ""
-			hasAccess := s.hasAnyAccess(p.UserID, p.Login)
-			switch {
-			case hasAccess && !p.CanReach:
-				state = "blocked"
-			case p.External && !hasAccess && p.CanReach:
-				state = "no-access"
-			}
-			if state == last[key] {
-				continue
-			}
-			last[key] = state
-			switch state {
-			case "blocked":
-				log.Printf("WARNING: %s (%s) has access to shares, but the tailnet policy blocks their device from port 443. "+
-					"Add a grant like {\"src\": [\"autogroup:shared\"], \"dst\": [\"<this node>\"], \"ip\": [\"443\"]}.", p.Login, p.Node)
-			case "no-access":
-				log.Printf("%s (id:%d) can reach tailshare but has no access to any share yet", p.Login, p.UserID)
-			}
-		}
+		s.checkReach(ctx, last)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+	}
+}
+
+// checkReach is advisory, so a failure in it is logged rather than allowed
+// to take down the file server.
+func (s *Server) checkReach(ctx context.Context, last map[string]string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("policy check crashed: %v", r)
+		}
+	}()
+	peers, err := s.opt.Reach(ctx)
+	if err != nil {
+		log.Printf("policy check: %v", err)
+		return
+	}
+	for _, p := range peers {
+		key := p.Login + "|" + p.Node
+		state := ""
+		hasAccess := s.hasAnyAccess(p.UserID, p.Login)
+		switch {
+		case hasAccess && !p.CanReach:
+			state = "blocked"
+		case p.External && !hasAccess && p.CanReach:
+			state = "no-access"
+		}
+		if state == last[key] {
+			continue
+		}
+		last[key] = state
+		switch state {
+		case "blocked":
+			src := p.Login
+			if p.External {
+				src = "autogroup:shared"
+			}
+			log.Printf("WARNING: %s (%s) has access to shares, but the tailnet policy blocks their device from port 443. "+
+				"Add a grant like {\"src\": [%q], \"dst\": [\"<this node>\"], \"ip\": [\"443\"]}.", p.Login, p.Node, src)
+		case "no-access":
+			log.Printf("%s (id:%d) can reach tailshare but has no access to any share yet", p.Login, p.UserID)
 		}
 	}
 }

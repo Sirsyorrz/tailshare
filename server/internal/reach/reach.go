@@ -43,7 +43,7 @@ func Check(ctx context.Context, lc *local.Client, port uint16) ([]Peer, error) {
 	}
 	out := []Peer{}
 	for _, p := range st.Peer {
-		if len(p.Tags.AsSlice()) > 0 {
+		if p.Tags != nil && p.Tags.Len() > 0 {
 			continue
 		}
 		u := st.User[p.UserID]
