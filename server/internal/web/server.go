@@ -166,6 +166,9 @@ func (s *Server) checkReach(ctx context.Context, last map[string]string) {
 func (s *Server) hasAnyAccess(userID int64, login string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.cfg.IsAdmin(userID, login) && len(s.cfg.Shares) > 0 {
+		return true
+	}
 	now := time.Now()
 	for i := range s.cfg.Shares {
 		if s.cfg.Shares[i].GrantFor(userID, login, now).Perms != 0 {

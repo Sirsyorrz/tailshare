@@ -49,7 +49,7 @@ func (s *Server) withShare(need perm.Set, h func(http.ResponseWriter, *http.Requ
 		var g config.Grant
 		if sh != nil {
 			if sc := s.shareConfig(name); sc != nil {
-				g = sc.GrantFor(u.ID, u.Login, time.Now())
+				g = s.grantLocked(u, sc)
 			}
 		}
 		s.mu.RUnlock()
@@ -86,7 +86,21 @@ type shareInfo struct {
 func (s *Server) isAdmin(u identity.User) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.isAdminLocked(u)
+}
+
+// isAdminLocked and grantLocked need s.mu held.
+func (s *Server) isAdminLocked(u identity.User) bool {
 	return s.cfg.IsAdmin(u.ID, u.Login) && (!u.External || s.cfg.AllowExternalAdmins)
+}
+
+// grantLocked gives admins full control of every share, so the owner can
+// never be locked out of their own server's folders.
+func (s *Server) grantLocked(u identity.User, sc *config.Share) config.Grant {
+	if s.isAdminLocked(u) {
+		return sc.OwnerGrant()
+	}
+	return sc.GrantFor(u.ID, u.Login, time.Now())
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +110,6 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		Admin  bool          `json:"admin"`
 		Shares []shareInfo   `json:"shares"`
 	}{User: u, Admin: s.isAdmin(u), Shares: []shareInfo{}}
-	now := time.Now()
 	s.mu.RLock()
 	for i := range s.cfg.Shares {
 		sc := &s.cfg.Shares[i]
@@ -104,7 +117,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		if sh == nil {
 			continue
 		}
-		g := sc.GrantFor(u.ID, u.Login, now)
+		g := s.grantLocked(u, sc)
 		if g.Perms == 0 {
 			continue
 		}

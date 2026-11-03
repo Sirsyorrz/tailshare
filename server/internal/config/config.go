@@ -223,7 +223,24 @@ type Grant struct {
 // GrantFor merges every access entry matching the user that hasn't expired.
 // A key without a quota makes the result unlimited.
 func (s *Share) GrantFor(userID int64, login string, now time.Time) Grant {
+	return s.grant(userID, login, now, false)
+}
+
+// OwnerGrant is what an admin gets on every share: full control, no limit,
+// no expiry. A read-only share stays read-only even for them.
+func (s *Share) OwnerGrant() Grant {
+	return s.grant(0, "", time.Time{}, true)
+}
+
+func (s *Share) grant(userID int64, login string, now time.Time, owner bool) Grant {
 	var g Grant
+	if owner {
+		g.Perms = perm.Presets["editor"] | perm.DeleteOwn
+		if s.ReadOnly {
+			g.Perms = g.Perms.ReadOnly()
+		}
+		return g
+	}
 	unlimited := false
 	for k, v := range s.Access {
 		if !keyMatches(k, userID, login) {

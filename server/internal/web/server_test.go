@@ -252,3 +252,25 @@ func TestZipEndpoint(t *testing.T) {
 		t.Errorf("disposition %q", cd)
 	}
 }
+
+func TestAdminsOwnEveryShare(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{Admins: []string{"boss@x"}, Shares: []config.Share{
+		{Name: "s", Path: dir, Access: map[string]perm.Set{}},
+		{Name: "ro", Path: t.TempDir(), ReadOnly: true, Access: map[string]perm.Set{}},
+	}}
+	h := serverAs(t, identity.User{ID: 1, Login: "boss@x"}, cfg)
+	if w := upload(t, h, "s", "a.txt", "hi"); w.Code != 200 {
+		t.Fatalf("admin upload to a share with no access entry: %d %s", w.Code, w.Body)
+	}
+	if w := do(h, req("POST", "/api/shares/s/delete", map[string]string{"path": "a.txt"}, csrf)); w.Code != http.StatusNoContent {
+		t.Fatalf("admin delete: %d", w.Code)
+	}
+	if w := upload(t, h, "ro", "a.txt", "hi"); w.Code != http.StatusForbidden {
+		t.Fatalf("admin upload to read-only share: %d", w.Code)
+	}
+	ext := serverAs(t, identity.User{ID: 1, Login: "boss@x", External: true}, cfg)
+	if w := do(ext, req("GET", "/api/shares/s/list", nil, nil)); w.Code != http.StatusNotFound {
+		t.Fatalf("admin from a shared-in device got owner access: %d", w.Code)
+	}
+}

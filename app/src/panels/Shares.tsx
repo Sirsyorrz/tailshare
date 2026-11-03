@@ -45,6 +45,25 @@ function toDraft(c: Config): Draft {
   };
 }
 
+// Admins own every share on the server side, so per-share entries for them
+// do nothing and only confuse; they're dropped on save.
+function isAdminKey(admins: string[], people: Map<string, Person>, key: string) {
+  const a = admins.map((x) => x.toLowerCase());
+  return a.includes(key.toLowerCase()) || a.includes(labelFor(people, key).toLowerCase());
+}
+
+function withoutAdmins(d: Draft, people: Map<string, Person>): Draft {
+  const next = structuredClone(d);
+  for (const s of next.shares)
+    for (const k of Object.keys(s.access))
+      if (isAdminKey(next.admins, people, k)) {
+        delete s.access[k];
+        delete s.quotaGB?.[k];
+        delete s.expires?.[k];
+      }
+  return next;
+}
+
 function fromDraft(d: Draft): Config {
   const clean = <T,>(m: Record<string, T> | undefined, keys: string[]) => {
     const out = Object.fromEntries(Object.entries(m ?? {}).filter(([k, v]) => keys.includes(k) && v !== undefined && v !== ""));
@@ -127,13 +146,13 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
   const people = usePeople(data?.status);
 
   useEffect(() => {
-    if (data) setDraft(toDraft(data.config));
-  }, [data]);
+    if (data) setDraft(withoutAdmins(toDraft(data.config), people));
+  }, [data, people]);
 
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data || !draft) return <div className="dim">Loading…</div>;
 
-  const original = JSON.stringify(toDraft(data.config));
+  const original = JSON.stringify(withoutAdmins(toDraft(data.config), people));
   const dirty = JSON.stringify(draft) !== original;
   const issues = problems(draft);
 
@@ -216,6 +235,7 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
             <AccessTable
               share={s}
               people={people}
+              admins={draft.admins}
               onChange={(f) => editShare(i, f)}
             />
           </div>
@@ -260,17 +280,21 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
 function AccessTable({
   share,
   people,
+  admins,
   onChange,
 }: {
   share: DraftShare;
   people: Map<string, Person>;
+  admins: string[];
   onChange: (f: (s: DraftShare) => void) => void;
 }) {
   const [custom, setCustom] = useState<Set<string>>(new Set());
   const [typing, setTyping] = useState(false);
   const [typed, setTyped] = useState("");
-  const keys = Object.keys(share.access);
-  const candidates = [...people.values()].filter((p) => !keys.includes(p.key) && !keys.includes(p.label));
+  const keys = Object.keys(share.access).filter((k) => !isAdminKey(admins, people, k));
+  const candidates = [...people.values()].filter(
+    (p) => !keys.includes(p.key) && !keys.includes(p.label) && !isAdminKey(admins, people, p.key),
+  );
 
   const add = (key: string) => {
     key = key.trim();
@@ -280,8 +304,7 @@ function AccessTable({
 
   return (
     <>
-      {keys.length > 0 ? (
-        <table className="grid">
+      <table className="grid">
           <thead>
             <tr>
               <th>Person</th>
@@ -292,6 +315,18 @@ function AccessTable({
             </tr>
           </thead>
           <tbody>
+            {admins.map((a) => (
+              <tr key={"admin:" + a}>
+                <td>
+                  <div>{labelFor(people, a)}</div>
+                  <div className="dim small">admin</div>
+                </td>
+                <td colSpan={4} className="small">
+                  Owner: full control{share.readOnly ? " (read-only share)" : ""}, no limit. Admins always have this on
+                  every share.
+                </td>
+              </tr>
+            ))}
             {keys.map((k) => {
               const perms = share.access[k];
               const preset = presetOf(perms);
@@ -402,10 +437,8 @@ function AccessTable({
               );
             })}
           </tbody>
-        </table>
-      ) : (
-        <div className="dim small">Nobody has access yet.</div>
-      )}
+      </table>
+      {keys.length === 0 && <div className="dim small">Nobody else has access yet.</div>}
 
       <div className="row">
         {typing ? (
