@@ -85,6 +85,7 @@ export interface PeerStatus {
   online: boolean;
   external: boolean;
   canReach: boolean;
+  lastSeen?: string;
   hasAccess: boolean;
 }
 

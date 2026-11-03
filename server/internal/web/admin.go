@@ -41,7 +41,8 @@ func (s *Server) adminShare(w http.ResponseWriter, r *http.Request) *store.Share
 
 type peerStatus struct {
 	reach.Peer
-	HasAccess bool `json:"hasAccess"`
+	HasAccess bool       `json:"hasAccess"`
+	LastSeen  *time.Time `json:"lastSeen,omitempty"`
 }
 
 type shareStatus struct {
@@ -83,7 +84,12 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 			out.PolicyKnown = true
 			out.Grant = reach.Grant(rep.Self)
 			for _, p := range rep.Peers {
-				out.Peers = append(out.Peers, peerStatus{Peer: p, HasAccess: s.hasAnyAccess(p.UserID, p.Login)})
+				ps := peerStatus{HasAccess: s.hasAnyAccess(p.UserID, p.Login)}
+				if seen := s.observedReach(&p); !seen.IsZero() {
+					ps.LastSeen = &seen
+				}
+				ps.Peer = p
+				out.Peers = append(out.Peers, ps)
 			}
 		}
 	}

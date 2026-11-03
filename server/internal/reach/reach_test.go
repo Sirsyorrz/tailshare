@@ -45,3 +45,24 @@ func TestAllowed(t *testing.T) {
 		t.Error("udp-only rule should not allow tcp")
 	}
 }
+
+func TestCapSource(t *testing.T) {
+	self := addrs("100.101.1.1")
+	friend := addrs("100.102.2.2")
+	rules := []tailcfg.FilterRule{{
+		SrcIPs:   []string{"cap:example.com/shared-in"},
+		DstPorts: []tailcfg.NetPortRange{{IP: "100.101.1.1", Ports: tailcfg.PortRange{First: 443, Last: 443}}},
+	}}
+	f, err := newFilter(rules, self, map[netip.Addr]tailcfg.NodeCapMap{
+		friend[0]: {"example.com/shared-in": nil},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.allowed(friend, self, 443) {
+		t.Error("peer with the capability should be allowed")
+	}
+	if f.allowed(addrs("100.103.3.3"), self, 443) {
+		t.Error("peer without the capability should not be")
+	}
+}

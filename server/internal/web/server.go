@@ -55,6 +55,32 @@ type Server struct {
 	shares map[string]*store.Share
 
 	seen sync.Map
+	// lastSeen maps a source address to when it last made a request. It
+	// settles "can they connect" when the policy check can't tell.
+	lastSeen sync.Map
+}
+
+// recentlySeen is how long a request counts as proof that a device can
+// connect, in case the policy check gets a rule form wrong.
+const recentlySeen = 15 * time.Minute
+
+func (s *Server) seenAt(ips []string) time.Time {
+	var latest time.Time
+	for _, ip := range ips {
+		if v, ok := s.lastSeen.Load(ip); ok && v.(time.Time).After(latest) {
+			latest = v.(time.Time)
+		}
+	}
+	return latest
+}
+
+// observedReach overrides the policy check with what actually happened.
+func (s *Server) observedReach(p *reach.Peer) (seen time.Time) {
+	seen = s.seenAt(p.IPs)
+	if !p.CanReach && !seen.IsZero() && time.Since(seen) < recentlySeen {
+		p.CanReach = true
+	}
+	return seen
 }
 
 func New(opt Options) *Server {
@@ -152,10 +178,14 @@ func (s *Server) checkReach(ctx context.Context, last map[string]string) {
 		return
 	}
 	for _, p := range rep.Peers {
+		policySays := p.CanReach
+		s.observedReach(&p)
 		key := p.Login + "|" + p.Node
 		state := ""
 		hasAccess := s.hasAnyAccess(p.UserID, p.Login)
 		switch {
+		case !policySays && p.CanReach:
+			state = "mismatch"
 		case hasAccess && !p.CanReach:
 			state = "blocked"
 		case p.External && !hasAccess && p.CanReach:
@@ -166,6 +196,10 @@ func (s *Server) checkReach(ctx context.Context, last map[string]string) {
 		}
 		last[key] = state
 		switch state {
+		case "mismatch":
+			rules, _ := json.Marshal(rep.Rules)
+			log.Printf("policy check: %s (%s, %v) connected although no rule seemed to allow it; please report. rules=%s",
+				p.Login, p.Node, p.IPs, rules)
 		case "blocked":
 			grant := reach.Grant(rep.Self)
 			if !p.External {

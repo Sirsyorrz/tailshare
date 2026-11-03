@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const uiCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; " +
@@ -55,6 +57,9 @@ func (s *Server) guard(next http.Handler) http.Handler {
 			log.Printf("rejected %s: %v", r.RemoteAddr, err)
 			http.Error(w, "tailshare only serves Tailscale users", http.StatusForbidden)
 			return
+		}
+		if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			s.lastSeen.Store(ip, time.Now())
 		}
 		if _, dup := s.seen.LoadOrStore(u.Node+"|"+u.Login, true); !dup {
 			log.Printf("identity login=%s id=%d display=%q node=%s external=%v", u.Login, u.ID, u.Display, u.Node, u.External)

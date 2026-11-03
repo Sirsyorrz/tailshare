@@ -6,6 +6,7 @@ package reach
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/netip"
 	"slices"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"go4.org/netipx"
 	"tailscale.com/client/local"
 	"tailscale.com/tailcfg"
+	"tailscale.com/types/logger"
+	"tailscale.com/wgengine/filter"
 )
 
 type Peer struct {
@@ -25,16 +28,18 @@ type Peer struct {
 	CanReach bool     `json:"canReach"`
 }
 
-const tcp = 6
-
 type Report struct {
 	// Self is this node's Tailscale addresses.
 	Self  []string
 	Peers []Peer
+	// Rules as received, for diagnosing a wrong answer.
+	Rules []tailcfg.FilterRule
 }
 
 // Check reports every peer and whether it may open TCP connections to port
-// on this node.
+// on this node, by running Tailscale's own packet filter over the rules this
+// node was given. Rules can name sources by node capability ("cap:..."),
+// which is how some sharing access arrives, so a plain IP match isn't enough.
 func Check(ctx context.Context, lc *local.Client, port uint16) (Report, error) {
 	st, err := lc.Status(ctx)
 	if err != nil {
@@ -47,6 +52,16 @@ func Check(ctx context.Context, lc *local.Client, port uint16) (Report, error) {
 	var self []netip.Addr
 	if st.Self != nil {
 		self = st.Self.TailscaleIPs
+	}
+	caps := map[netip.Addr]tailcfg.NodeCapMap{}
+	for _, p := range st.Peer {
+		for _, ip := range p.TailscaleIPs {
+			caps[ip] = p.CapMap
+		}
+	}
+	f, err := newFilter(rules, self, caps)
+	if err != nil {
+		return Report{}, err
 	}
 	out := []Peer{}
 	for _, p := range st.Peer {
@@ -64,7 +79,7 @@ func Check(ctx context.Context, lc *local.Client, port uint16) (Report, error) {
 			Node:     name,
 			Online:   p.Online,
 			External: p.ShareeNode,
-			CanReach: Allowed(rules, p.TailscaleIPs, self, port),
+			CanReach: f.allowed(p.TailscaleIPs, self, port),
 		}
 		for _, ip := range p.TailscaleIPs {
 			peer.IPs = append(peer.IPs, ip.String())
@@ -72,11 +87,52 @@ func Check(ctx context.Context, lc *local.Client, port uint16) (Report, error) {
 		out = append(out, peer)
 	}
 	slices.SortFunc(out, func(a, b Peer) int { return strings.Compare(a.Login+a.Node, b.Login+b.Node) })
-	rep := Report{Peers: out}
+	rep := Report{Peers: out, Rules: rules}
 	for _, ip := range self {
 		rep.Self = append(rep.Self, ip.String())
 	}
 	return rep, nil
+}
+
+type pfilter struct{ f *filter.Filter }
+
+func newFilter(rules []tailcfg.FilterRule, self []netip.Addr, caps map[netip.Addr]tailcfg.NodeCapMap) (pfilter, error) {
+	matches, err := filter.MatchesFromFilterRules(rules)
+	if err != nil {
+		// Partial results are still usable; unknown rule forms are skipped
+		// by the real filter too.
+		log.Printf("policy check: %v", err)
+	}
+	var b netipx.IPSetBuilder
+	for _, a := range self {
+		b.Add(a)
+	}
+	local, err := b.IPSet()
+	if err != nil {
+		return pfilter{}, err
+	}
+	hasCap := func(src netip.Addr, c tailcfg.NodeCapability) bool {
+		return caps[src].Contains(c)
+	}
+	return pfilter{filter.New(matches, hasCap, local, nil, nil, logger.Discard)}, nil
+}
+
+func (p pfilter) allowed(srcs, dsts []netip.Addr, port uint16) bool {
+	for _, s := range srcs {
+		for _, d := range dsts {
+			if s.Is4() == d.Is4() && p.f.CheckTCP(s, d, port) == filter.Accept {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Allowed reports whether rules let any source reach any destination on
+// port over TCP.
+func Allowed(rules []tailcfg.FilterRule, srcs, dsts []netip.Addr, port uint16) bool {
+	f, err := newFilter(rules, dsts, nil)
+	return err == nil && f.allowed(srcs, dsts, port)
 }
 
 // Grant is the policy-file grant that lets people a node is shared with
@@ -88,52 +144,4 @@ func Grant(selfIPs []string) string {
 	}
 	dst, _ := json.Marshal(selfIPs)
 	return `{"src": ["autogroup:shared"], "dst": ` + strings.ReplaceAll(string(dst), ",", ", ") + `, "ip": ["tcp:443"]}`
-}
-
-// Allowed reports whether any rule lets a source address reach a
-// destination address on port over TCP.
-func Allowed(rules []tailcfg.FilterRule, srcs, dsts []netip.Addr, port uint16) bool {
-	for _, r := range rules {
-		if len(r.IPProto) > 0 && !slices.Contains(r.IPProto, tcp) {
-			continue
-		}
-		if !anyMatch(r.SrcIPs, srcs) {
-			continue
-		}
-		for _, d := range r.DstPorts {
-			if d.Ports.First <= port && port <= d.Ports.Last && anyMatch([]string{d.IP}, dsts) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anyMatch(patterns []string, addrs []netip.Addr) bool {
-	for _, pat := range patterns {
-		for _, a := range addrs {
-			if match(pat, a) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// match handles the address forms FilterRule uses: "*", an IP, a CIDR, or
-// an "a-b" range.
-func match(pat string, a netip.Addr) bool {
-	switch {
-	case pat == "*":
-		return true
-	case strings.Contains(pat, "/"):
-		p, err := netip.ParsePrefix(pat)
-		return err == nil && p.Contains(a)
-	case strings.Contains(pat, "-"):
-		r, err := netipx.ParseIPRange(pat)
-		return err == nil && r.Contains(a)
-	default:
-		ip, err := netip.ParseAddr(pat)
-		return err == nil && ip == a
-	}
 }

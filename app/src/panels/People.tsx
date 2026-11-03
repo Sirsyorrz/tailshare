@@ -6,6 +6,14 @@ import { useStore } from "../state/store";
 
 /// Everyone the server can see: who has access, who accepted a share but
 /// has none yet, and who the tailnet policy is blocking.
+function ago(iso: string) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 export function People({ base }: { base: string }) {
   const { data, error, reload } = useLoad(async () => {
     const [status, cfg] = await Promise.all([
@@ -87,6 +95,11 @@ export function People({ base }: { base: string }) {
               const p = ps[0];
               const access = accessOf(p.userId, p.login);
               const reach = ps.every((x) => x.canReach) ? "ok" : ps.some((x) => x.canReach) ? "some" : "blocked";
+              const seen = ps
+                .map((x) => x.lastSeen)
+                .filter(Boolean)
+                .sort()
+                .pop();
               return (
                 <tr key={p.userId}>
                   <td>
@@ -139,6 +152,7 @@ export function People({ base }: { base: string }) {
                     ) : (
                       <span className="bad">{reach === "some" ? "some devices blocked" : "blocked by tailnet policy"}</span>
                     )}
+                    {seen && <div className="dim">active {ago(seen)}</div>}
                   </td>
                 </tr>
               );
