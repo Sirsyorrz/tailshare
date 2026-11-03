@@ -107,6 +107,19 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("modal-back").hidden) $("modal-cancel").click();
 });
 
+// Mirrors perm.Presets on the server; perms arrive sorted.
+const PRESETS = {
+  viewer: "download,view",
+  contributor: "download,mkdir,upload,view",
+  editor: "delete,download,mkdir,overwrite,rename,upload,view",
+  "upload only": "upload",
+};
+
+function permLabel(perms) {
+  const key = perms.join(",");
+  return Object.keys(PRESETS).find((k) => PRESETS[k] === key) || perms.join(", ");
+}
+
 function renderShares() {
   const ul = $("shares");
   ul.replaceChildren();
@@ -115,7 +128,7 @@ function renderShares() {
       "li",
       { class: state.share && state.share.name === s.name ? "active" : "", onclick: () => openShare(s, "") },
       el("span", { text: s.name }),
-      el("span", { class: "perms", text: s.perms.join(", ") }),
+      el("span", { class: "perms", text: permLabel(s.perms) }),
     );
     ul.append(li);
   }
@@ -284,10 +297,28 @@ function renderTransfers() {
   document.title = running ? `(${running}) tailshare` : "tailshare";
 }
 
-function enqueue(files) {
+async function enqueue(fileList) {
   if (!state.share || !has("upload")) return;
+  const files = [...fileList];
+  const share = state.share.name;
+  const dir = state.path;
+  let replace = false;
+  if (has("overwrite")) {
+    const existing = new Set(state.entries.filter((e) => !e.dir).map((e) => e.name));
+    const clashes = files.filter((f) => existing.has(f.name));
+    if (clashes.length) {
+      const choice = await modal({
+        title: clashes.length === 1 ? `${clashes[0].name} already exists` : `${clashes.length} files already exist`,
+        text: "Replace (old versions go to trash) or keep both?",
+        ok: "Keep both",
+        alt: "Replace",
+      });
+      if (choice === null) return;
+      replace = choice === "alt";
+    }
+  }
   for (const file of files) {
-    transfers.push({ file, share: state.share.name, dir: state.path, offset: 0, state: "queued", replace: false });
+    transfers.push({ file, share, dir, offset: 0, state: "queued", replace });
   }
   renderTransfers();
   pump();
@@ -390,18 +421,7 @@ async function runUpload(t) {
   }
   if (t.state === "cancelled") return;
 
-  let replace = false;
-  const here = state.share && state.share.name === t.share && state.path === t.dir;
-  if (here && state.entries.some((x) => x.name === t.file.name && !x.dir) && has("overwrite")) {
-    const choice = await modal({
-      title: `${t.file.name} already exists`,
-      text: "Replace it (the old file goes to trash) or keep both?",
-      ok: "Keep both",
-      alt: "Replace",
-    });
-    replace = choice === "alt";
-  }
-  const res = await api("POST", shareURL(t.share, `uploads/${t.id}/complete`), { replace });
+  const res = await api("POST", shareURL(t.share, `uploads/${t.id}/complete`), { replace: t.replace });
   localStorage.removeItem(resumeKey(t));
   t.finalName = res.name;
   t.state = "done";
@@ -482,7 +502,7 @@ async function init() {
     return;
   }
   const u = state.me.user;
-  $("whoami").textContent = `${u.display || u.login} (${u.login}) on ${u.node}`;
+  $("whoami").textContent = (u.display && u.display !== u.login ? `${u.display} (${u.login})` : u.login) + ` on ${u.node}`;
   renderShares();
 
   const [shareName, ...rest] = decodeURIComponent(location.hash.slice(1)).split("/");
