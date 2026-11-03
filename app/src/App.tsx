@@ -5,7 +5,8 @@ import { Settings } from "./panels/Settings";
 import { Updater } from "./panels/Updater";
 import { Host } from "./panels/Host";
 import { Server } from "./panels/Server";
-import { baseOf, shortName, type HostState } from "./lib/api";
+import { Drives } from "./panels/Drives";
+import { baseOf, pendingUploads, shortName, type HostState } from "./lib/api";
 import "./app.css";
 
 function Status() {
@@ -34,6 +35,9 @@ function Sidebar() {
   const scanning = useStore((s) => s.scanning);
   const select = useStore((s) => s.select);
   const hostBase = host.url ? baseOf(host.url) : "";
+  const drives = useStore((s) => s.drives);
+  const pending = pendingUploads(drives);
+  const active = drives.transfers.length;
 
   return (
     <div className="sidebar">
@@ -43,6 +47,13 @@ function Sidebar() {
           <span className={"dot " + host.phase} />
           <span className="grow">Hosting</span>
           <span className="dim small">{host.phase === "running" ? host.hostname : ""}</span>
+        </li>
+        <li className={selected.kind === "drives" ? "active" : ""} onClick={() => select({ kind: "drives" })}>
+          <span className={"dot " + (drives.mounts.length ? "running" : "stopped")} />
+          <span className="grow">Drives &amp; transfers</span>
+          <span className="dim small">
+            {active > 0 ? `${active} active` : pending > 0 ? `${pending} queued` : drives.mounts.length ? `${drives.mounts.length} mounted` : ""}
+          </span>
         </li>
       </ul>
       <div className="sidebar-h">Servers</div>
@@ -95,6 +106,13 @@ function Main() {
       <div className="main">{s ? <Server key={s.base} server={s} /> : <div className="view dim">Looking for that server…</div>}</div>
     );
   }
+  if (selected.kind === "drives") {
+    return (
+      <div className="main">
+        <Drives />
+      </div>
+    );
+  }
   return (
     <div className="main">
       <Host />
@@ -128,9 +146,12 @@ export default function App() {
     // A background server isn't our child, so its state is polled from its
     // status file instead of pushed.
     const poll = setInterval(() => useStore.getState().background && void useStore.getState().loadHost(), 2000);
+    void useStore.getState().loadDrives();
+    const drivePoll = setInterval(() => void useStore.getState().loadDrives(), 1500);
     return () => {
       clearInterval(t);
       clearInterval(poll);
+      clearInterval(drivePoll);
       unlisten.forEach((p) => void p.then((f) => f()));
     };
   }, []);

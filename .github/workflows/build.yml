@@ -42,10 +42,10 @@ jobs:
       - name: Server tests
         working-directory: server
         run: go vet ./... && go test ./...
-      # tauri-build refuses to compile without the sidecar present.
-      - name: Build sidecar
+      # tauri-build refuses to compile without the sidecars present.
+      - name: Sidecars
         working-directory: app
-        run: node scripts/build-server.mjs
+        run: node scripts/build-server.mjs && node scripts/fetch-rclone.mjs
 
       - name: Formatting
         working-directory: app/src-tauri

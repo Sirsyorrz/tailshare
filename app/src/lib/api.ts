@@ -148,6 +148,63 @@ export interface Settings {
   hostname: string;
   roots: string[];
   servers: string[];
+  drives: DriveSpec[];
+  cacheGb: number;
+}
+
+export interface DriveSpec {
+  base: string;
+  share: string;
+  target: string;
+  readOnly: boolean;
+  auto: boolean;
+}
+
+export interface Queued {
+  name: string;
+  size: number;
+  uploading: boolean;
+  startsIn: number;
+  tries: number;
+  error?: string;
+}
+
+export interface Mounted {
+  remote: string;
+  target: string;
+  cacheBytes: number;
+  uploadsQueued: number;
+  uploadsInProgress: number;
+  erroredFiles: number;
+  queue: Queued[];
+}
+
+export interface Transfer {
+  name: string;
+  remote: string;
+  upload: boolean;
+  size: number;
+  bytes: number;
+  speed: number;
+  eta?: number;
+}
+
+export interface DrivesState {
+  running: boolean;
+  missing?: "winfsp" | "fuse";
+  mounts: Mounted[];
+  transfers: Transfer[];
+  log: string[];
+  names: Record<string, string>;
+}
+
+/// A share can be a drive only if you can read what's in it.
+export const mountable = (perms: Perm[]) => perms.includes("view") && perms.includes("download");
+const WRITE: Perm[] = ["upload", "mkdir", "overwrite", "rename", "delete", "deleteown"];
+export const canWrite = (perms: Perm[]) => WRITE.some((p) => perms.includes(p));
+
+export function pendingUploads(d: DrivesState): number {
+  return d.mounts.reduce((n, m) => n + Math.max(m.queue.length, m.uploadsQueued + m.uploadsInProgress), 0);
 }
 
 export class ApiError extends Error {

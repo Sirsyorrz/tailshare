@@ -4,8 +4,8 @@ Share folders with friends across tailnets. Friends open a web page through a sh
 Tailscale node, and tailshare uses their Tailscale identity for per-folder permissions,
 with no passwords. Not affiliated with Tailscale.
 
-Early stage. The headless server, web UI and desktop app work; mounting as a
-drive and released builds are still to come.
+Early stage. The headless server, web UI and desktop app (including mounting
+shares as drives) work; released builds are still to come.
 
 ## Web UI
 
@@ -40,6 +40,29 @@ Needs Go, Rust and Node. `npm run server` builds the bundled server on its own.
 service (Linux, with lingering so it starts at boot) or a hidden logon task
 (Windows). The app then follows it through `status.json` and `server.log` in
 its state folder.
+
+### Drives
+
+Any share you can see and download from can be mounted from the app ("Your
+access", then Mount): a drive letter on Windows, an empty folder on Linux. Every
+program can then open and save files on it directly. The app bundles
+[rclone](https://rclone.org), which talks WebDAV to the server's `/dav/`
+endpoint under the same permissions, quotas, trash and activity log as the web
+UI.
+
+Files you open are cached on your computer (20 GB by default, set on the Drives
+page). Saves upload in the background a few seconds after the file is closed;
+the "Drives & transfers" page shows progress, what's queued and anything the
+server refused. Unfinished uploads survive unmounting, quitting and crashes,
+and continue the next time the drive is mounted. Changes made by other people
+show up within about 20 seconds.
+
+Windows needs [WinFsp](https://winfsp.dev/rel/) installed once; Linux needs
+FUSE (`fuse3`). Upload-only shares can't be mounted. Moving files between two
+shares on a drive is a copy plus delete, not a rename.
+
+`npm run rclone` downloads the bundled rclone; its checksums are pinned in
+`app/scripts/fetch-rclone.mjs`.
 
 ## Run the server
 

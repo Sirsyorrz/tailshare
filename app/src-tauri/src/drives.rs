@@ -229,6 +229,7 @@ pub struct Mounted {
 pub struct Transfer {
     pub name: String,
     pub remote: String,
+    pub upload: bool,
     pub size: i64,
     pub bytes: i64,
     pub speed: f64,
@@ -244,6 +245,8 @@ pub struct DrivesState {
     pub mounts: Vec<Mounted>,
     pub transfers: Vec<Transfer>,
     pub log: Vec<String>,
+    /// rclone remote name to share name, for labelling transfers.
+    pub names: HashMap<String, String>,
 }
 
 impl Drives {
@@ -448,16 +451,14 @@ impl Drives {
         }
         if let Ok(s) = Self::call(port, &pass, "core/stats", json!({})).await {
             for t in s["transferring"].as_array().into_iter().flatten() {
-                let remote = t["dstFs"]
-                    .as_str()
-                    .filter(|f| f.starts_with("ts-"))
-                    .or(t["srcFs"].as_str())
-                    .unwrap_or("")
-                    .trim_end_matches(':')
-                    .to_string();
+                // Uploads go into one of our remotes; reads come out of one.
+                let dst = t["dstFs"].as_str().unwrap_or("");
+                let upload = dst.starts_with("ts-");
+                let remote = if upload { dst } else { t["srcFs"].as_str().unwrap_or("") };
                 st.transfers.push(Transfer {
                     name: t["name"].as_str().unwrap_or("").to_string(),
-                    remote,
+                    remote: remote.trim_end_matches(':').to_string(),
+                    upload,
                     size: t["size"].as_i64().unwrap_or(0),
                     bytes: t["bytes"].as_i64().unwrap_or(0),
                     speed: t["speedAvg"].as_f64().or(t["speed"].as_f64()).unwrap_or(0.0),

@@ -6,6 +6,7 @@ import { Shares } from "./Shares";
 import { People } from "./People";
 import { Activity } from "./Activity";
 import { Trash } from "./Trash";
+import { DriveButtons } from "./Drives";
 
 type Tab = "access" | "shares" | "people" | "activity" | "trash";
 
@@ -78,8 +79,9 @@ export function Server({ server }: { server: ServerT }) {
                       {fmtSize(s.used)}
                       {s.quota ? ` of ${fmtSize(s.quota)}` : ""}
                     </td>
-                    <td className="right">
-                      <button onClick={() => void openUrl(server.base + "#" + encodeURIComponent(s.name))}>Open</button>
+                    <td className="right nowrap">
+                      <button onClick={() => void openUrl(server.base + "#" + encodeURIComponent(s.name))}>Open in browser</button>
+                      <DriveButtons base={server.base} share={s} />
                     </td>
                   </tr>
                 ))}

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { get, baseOf, type HostSnapshot, type HostState, type Me, type Settings, type Tailnet } from "../lib/api";
+import { get, baseOf, type DrivesState, type HostSnapshot, type HostState, type Me, type Settings, type Tailnet } from "../lib/api";
 
 export interface Server {
   base: string;
@@ -9,7 +9,7 @@ export interface Server {
   error?: string;
 }
 
-export type Selection = { kind: "host" } | { kind: "server"; base: string };
+export type Selection = { kind: "host" } | { kind: "drives" } | { kind: "server"; base: string };
 
 interface State {
   message: string;
@@ -27,6 +27,7 @@ interface State {
   background: boolean;
   backgroundSupported: boolean;
   settings: Settings | null;
+  drives: DrivesState;
 
   say: (message: string) => void;
   setShowSettings: (v: boolean) => void;
@@ -35,6 +36,7 @@ interface State {
   loadHost: () => Promise<void>;
   loadSettings: () => Promise<void>;
   saveSettings: (s: Settings) => Promise<void>;
+  loadDrives: () => Promise<void>;
 }
 
 export const useStore = create<State>((set, getState) => ({
@@ -52,6 +54,7 @@ export const useStore = create<State>((set, getState) => ({
   background: false,
   backgroundSupported: false,
   settings: null,
+  drives: { running: false, mounts: [], transfers: [], log: [], names: {} },
 
   say: (message) => set({ message }),
   setShowSettings: (showSettings) => set({ showSettings }),
@@ -65,6 +68,14 @@ export const useStore = create<State>((set, getState) => ({
     if (snap.state.phase === "running" && was !== "running") {
       setTimeout(() => void getState().scan(), 3000);
       setTimeout(() => void getState().scan(), 15000);
+    }
+  },
+
+  loadDrives: async () => {
+    try {
+      set({ drives: await invoke<DrivesState>("drives_state") });
+    } catch {
+      // Polled; a failed poll just keeps the last state.
     }
   },
 

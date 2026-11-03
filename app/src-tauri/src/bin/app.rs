@@ -145,7 +145,11 @@ async fn host_stop(h: State<'_, host::Host>) -> Res<()> {
 
 #[tauri::command]
 async fn drives_state(d: State<'_, drives::Drives>) -> Res<drives::DrivesState> {
-    Ok(d.state().await)
+    let mut st = d.state().await;
+    for spec in settings::load().drives {
+        st.names.insert(drives::remote_name(&spec.base, &spec.share), spec.share);
+    }
+    Ok(st)
 }
 
 #[tauri::command]

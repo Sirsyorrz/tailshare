@@ -494,3 +494,39 @@ ul.plain .row {
   gap: var(--sp-1);
   white-space: nowrap;
 }
+
+.modal.narrow {
+  width: min(480px, 90vw);
+}
+.modal-f {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+.field.stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+.num-input {
+  width: 6em;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60vw;
+}
+.progress {
+  height: 4px;
+  margin: var(--sp-1) 0;
+  background: var(--line-soft);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.progress > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s;
+}
