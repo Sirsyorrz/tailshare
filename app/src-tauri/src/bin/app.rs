@@ -37,7 +37,8 @@ fn set_settings(s: settings::Settings) -> Res<()> {
     for b in &s.servers {
         api::check_base(b).map_err(err)?;
     }
-    settings::save(&s).map_err(err)
+    settings::save(&s).map_err(err)?;
+    host::write_roots(&s.roots).map_err(err)
 }
 
 #[derive(serde::Serialize)]

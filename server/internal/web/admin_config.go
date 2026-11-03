@@ -22,9 +22,10 @@ func (s *Server) adminConfigRoutes(mux *http.ServeMux) {
 
 // Configure sets where admin config edits are saved and which folders
 // shares may live in. Call before serving.
-func (s *Server) Configure(configPath string, roots []string) {
+func (s *Server) Configure(configPath string, roots []string, rootsFile string) {
 	s.opt.ConfigPath = configPath
 	s.opt.Roots = roots
+	s.opt.RootsFile = rootsFile
 }
 
 // Reload re-reads the config file, e.g. after SIGHUP.
@@ -102,8 +103,19 @@ func (s *Server) adminPutConfig(w http.ResponseWriter, r *http.Request) {
 
 // roots are the folders shares may live in, with symlinks resolved.
 func (s *Server) roots() []string {
+	all := s.opt.Roots
+	// Re-read every time so the desktop app can change it while running.
+	if s.opt.RootsFile != "" {
+		if b, err := os.ReadFile(s.opt.RootsFile); err == nil {
+			for _, line := range strings.Split(string(b), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					all = append(all, line)
+				}
+			}
+		}
+	}
 	out := []string{}
-	for _, r := range s.opt.Roots {
+	for _, r := range all {
 		if real, err := filepath.EvalSymlinks(r); err == nil {
 			out = append(out, real)
 		}

@@ -53,6 +53,15 @@ pub fn state_dir() -> PathBuf {
     crate::data_dir().join("host")
 }
 
+/// The server re-reads this on every use, so edits apply while hosting.
+pub fn write_roots(roots: &[String]) -> std::io::Result<()> {
+    let dir = state_dir();
+    std::fs::create_dir_all(&dir)?;
+    let tmp = dir.join("roots.txt.tmp");
+    std::fs::write(&tmp, roots.join("\n") + "\n")?;
+    std::fs::rename(tmp, dir.join("roots.txt"))
+}
+
 fn server_bin() -> anyhow::Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let dir = exe.parent().context("no exe dir")?;
@@ -112,12 +121,16 @@ impl Host {
             return Ok(());
         }
         let dir = state_dir();
+        write_roots(roots)?;
         let mut cmd = crate::quiet_command(server_bin()?);
         cmd.arg("-state")
             .arg(&dir)
             .args(["-hostname", hostname, "-events", "-exit-on-eof"])
-            .arg("-roots")
-            .arg(roots.join(","))
+            // Empty -roots overrides the server's home-folder default; the
+            // app's list is the only source.
+            .args(["-roots", ""])
+            .arg("-roots-file")
+            .arg(dir.join("roots.txt"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

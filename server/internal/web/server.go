@@ -34,8 +34,10 @@ type Options struct {
 	// ConfigPath is where admin edits are saved. Empty disables editing.
 	ConfigPath string
 	// Roots are the only folders shares may be created in.
-	Roots   []string
-	Version string
+	Roots []string
+	// RootsFile lists more roots, one per line, re-read on use.
+	RootsFile string
+	Version   string
 }
 
 type Server struct {

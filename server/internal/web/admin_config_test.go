@@ -22,7 +22,7 @@ func adminServer(t *testing.T) (http.Handler, string, string) {
 	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
 	cfg.Save(cfgPath)
 	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
-	s.Configure(cfgPath, []string{root})
+	s.Configure(cfgPath, []string{root}, "")
 	s.Load(cfg)
 	return s.Handler(), root, cfgPath
 }
@@ -103,12 +103,33 @@ func TestConfigEndpointsAdminOnly(t *testing.T) {
 	_, _, cfgPath := adminServer(t)
 	cfg, _ := config.Load(cfgPath)
 	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 2, Login: "friend@x"}}, Hosts: []string{host}, HTTPS: true})
-	s.Configure(cfgPath, []string{"/"})
+	s.Configure(cfgPath, []string{"/"}, "")
 	s.Load(cfg)
 	h := s.Handler()
 	for _, p := range []string{"/api/admin/config", "/api/admin/browse?path=/"} {
 		if w := do(h, req("GET", p, nil, nil)); w.Code != http.StatusNotFound {
 			t.Errorf("%s: %d", p, w.Code)
 		}
+	}
+}
+
+func TestRootsFileIsLive(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "late"), 0o755)
+	rootsFile := filepath.Join(t.TempDir(), "roots.txt")
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
+	cfg.Save(cfgPath)
+	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
+	s.Configure(cfgPath, nil, rootsFile)
+	s.Load(cfg)
+	h := s.Handler()
+	if w := do(h, req("GET", "/api/admin/browse", nil, nil)); strings.Contains(w.Body.String(), root) {
+		t.Fatal("root listed before it was added")
+	}
+	os.WriteFile(rootsFile, []byte(root+"\n"), 0o600)
+	real, _ := filepath.EvalSymlinks(root)
+	if w := do(h, req("GET", "/api/admin/browse", nil, nil)); !strings.Contains(w.Body.String(), real) {
+		t.Fatalf("root added at runtime not picked up: %s", w.Body)
 	}
 }

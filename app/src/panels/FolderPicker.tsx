@@ -55,7 +55,9 @@ export function FolderPicker({
                 {d}
               </li>
             ))}
-            {at && at.dirs.length === 0 && <li className="dim">No folders here.</li>}
+            {at && at.dirs.length === 0 && (
+              <li className="dim">{at.path ? "No folders inside this one." : "No allowed folders yet. Add one in Settings."}</li>
+            )}
           </ul>
           <div className="dim small">
             Only folders inside the server's allowed locations are shown. For this computer, change them in Settings.

@@ -51,6 +51,7 @@ func main() {
 	devUser := flag.String("dev-user", "dev@local", "dev only: identity every request gets")
 	defRoots, _ := os.UserHomeDir()
 	rootsFlag := flag.String("roots", defRoots, "comma-separated folders shares may be created in from the admin API")
+	rootsFile := flag.String("roots-file", "", "file listing more allowed folders, one per line, re-read on every use")
 	bootstrapAdmin := flag.String("bootstrap-admin", "", "login or id:<userid> made admin when the config has no admins")
 	flag.BoolVar(&eventsOut, "events", false, "print machine-readable TAILSHARE-EVENT lines on stdout (for the desktop app)")
 	exitOnEOF := flag.Bool("exit-on-eof", false, "exit when stdin closes, so a parent app's crash can't leave the server running")
@@ -115,7 +116,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	srv.Configure(*cfgPath, splitRoots(*rootsFlag))
+	srv.Configure(*cfgPath, splitRoots(*rootsFlag), *rootsFile)
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
 	go srv.WatchReach(ctx)

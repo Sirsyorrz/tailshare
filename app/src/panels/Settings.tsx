@@ -6,7 +6,6 @@ import { baseOf } from "../lib/api";
 export function Settings() {
   const isOpen = useStore((s) => s.showSettings);
   const settings = useStore((s) => s.settings);
-  const hosting = useStore((s) => s.host.phase !== "stopped" && s.host.phase !== "failed");
   const [server, setServer] = useState("");
   const [error, setError] = useState("");
   const close = () => useStore.getState().setShowSettings(false);
@@ -59,8 +58,9 @@ export function Settings() {
               Allowed folders
               <div className="dim">
                 Shares can only be made inside these, so a mistake in the share editor can't expose the rest of this
-                computer.{hosting && " Changes apply the next time hosting starts."}
+                computer.
               </div>
+              {settings.roots.length === 0 && <div className="bad small">None yet, so nothing can be shared.</div>}
               <ul className="plain">
                 {settings.roots.map((r) => (
                   <li key={r} className="row">
