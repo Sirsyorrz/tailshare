@@ -134,3 +134,42 @@ mod tests {
         assert!(check_base("file:///etc/passwd").is_err());
     }
 }
+
+/// Against a real server: TAILSHARE_TEST_BASE=https://x.ts.net/ cargo test -- --ignored
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn talks_to_a_live_server() {
+        let base = std::env::var("TAILSHARE_TEST_BASE").expect("TAILSHARE_TEST_BASE");
+        let rt = tauri::async_runtime::block_on(async {
+            let found = discover(vec![base.clone(), "https://example.com/".into()]).await;
+            let me = request(Request {
+                base: base.clone(),
+                method: "GET".into(),
+                path: "/api/me".into(),
+                body: None,
+                if_match: None,
+            })
+            .await
+            .unwrap();
+            let cfg = request(Request {
+                base,
+                method: "GET".into(),
+                path: "/api/admin/config".into(),
+                body: None,
+                if_match: None,
+            })
+            .await
+            .unwrap();
+            (found.len(), me.status, me.body, cfg.status, cfg.etag)
+        });
+        println!("{rt:?}");
+        assert_eq!(rt.0, 1);
+        assert_eq!(rt.1, 200);
+        assert_eq!(rt.3, 200);
+        assert!(rt.4.is_some());
+    }
+}
