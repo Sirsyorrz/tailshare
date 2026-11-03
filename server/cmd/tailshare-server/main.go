@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"tailscale.com/client/local"
 	"tailscale.com/tsnet"
 
 	"github.com/Sirsyorrz/tailshare/server/internal/config"
@@ -129,6 +130,38 @@ func devMode(addr, user string) (*web.Server, func() error, error) {
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }
 
+// dumpOnUSR1 logs the peers this node can see and the access rules it was
+// given, for working out why someone can't connect.
+func dumpOnUSR1(ctx context.Context, lc *local.Client) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGUSR1)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c:
+		}
+		st, err := lc.Status(ctx)
+		if err != nil {
+			log.Printf("dump: %v", err)
+			continue
+		}
+		for _, p := range st.Peer {
+			u := st.User[p.UserID]
+			log.Printf("dump peer %s user=%s ips=%v online=%v shareeNode=%v relay=%q addr=%q",
+				p.DNSName, u.LoginName, p.TailscaleIPs, p.Online, p.ShareeNode, p.Relay, p.CurAddr)
+		}
+		rules, err := lc.DebugPacketFilterRules(ctx)
+		if err != nil {
+			log.Printf("dump: %v", err)
+			continue
+		}
+		for _, r := range rules {
+			log.Printf("dump rule src=%v dst=%v", r.SrcIPs, r.DstPorts)
+		}
+	}
+}
+
 // dedupLogf drops consecutive repeats; tsnet re-prints the login URL every
 // few seconds until it is approved.
 func dedupLogf() func(string, ...any) {
@@ -187,6 +220,8 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool)
 		http.Redirect(w, r, "https://"+fqdn+r.URL.RequestURI(), http.StatusMovedPermanently)
 	})
 	go httpServer(redirect).Serve(plain)
+
+	go dumpOnUSR1(ctx, lc)
 
 	log.Printf("serving https://%s", fqdn)
 	srv := web.New(identity.Tailscale{LC: lc}, []string{fqdn}, true)
