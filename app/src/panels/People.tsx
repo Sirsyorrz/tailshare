@@ -103,14 +103,19 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
                     {access.length ? (
                       access.map((a) => <div key={a}>{a}</div>)
                     ) : granting === String(p.userId) ? (
-                      <select autoFocus value="" onChange={(e) => e.target.value && void give(p.userId, e.target.value)} onBlur={() => setGranting(null)}>
-                        <option value="">Pick a share…</option>
-                        {config.shares.map((s) => (
-                          <option key={s.name} value={s.name}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
+                      // No onBlur close: WebKitGTK blurs the select when its
+                      // popup opens, which would remove it before the pick lands.
+                      <span className="row tight">
+                        <select value="" onChange={(e) => e.target.value && void give(p.userId, e.target.value)}>
+                          <option value="">Pick a share…</option>
+                          {config.shares.map((s) => (
+                            <option key={s.name} value={s.name}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button onClick={() => setGranting(null)}>Cancel</button>
+                      </span>
                     ) : (
                       <button disabled={!config.shares.length} onClick={() => setGranting(String(p.userId))}>
                         Give access

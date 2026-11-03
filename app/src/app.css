@@ -484,3 +484,7 @@ ul.plain {
 ul.plain .row {
   margin: 2px 0;
 }
+
+.row.tight {
+  margin: 0;
+}
