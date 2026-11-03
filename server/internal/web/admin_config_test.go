@@ -133,3 +133,34 @@ func TestRootsFileIsLive(t *testing.T) {
 		t.Fatalf("root added at runtime not picked up: %s", w.Body)
 	}
 }
+
+func TestExistingShareEditableAfterRootRemoved(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "footage", "2026"), 0o755)
+	rootsFile := filepath.Join(t.TempDir(), "roots.txt")
+	os.WriteFile(rootsFile, []byte(root+"\n"), 0o600)
+	cfgPath := filepath.Join(t.TempDir(), "config.json")
+	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
+	cfg.Save(cfgPath)
+	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
+	s.Configure(cfgPath, nil, rootsFile)
+	s.Load(cfg)
+	h := s.Handler()
+
+	path := filepath.Join(root, "footage")
+	share := func(who string) string {
+		return `{"admins":["boss@x"],"shares":[{"name":"f","path":"` + path + `","access":{"` + who + `":"viewer"}}]}`
+	}
+	if w := putConfig(h, getVersion(t, h), share("a@x")); w.Code != 200 {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	os.WriteFile(rootsFile, nil, 0o600)
+	if w := putConfig(h, getVersion(t, h), share("b@x")); w.Code != 200 {
+		t.Fatalf("editing an existing share after its root was removed: %d %s", w.Code, w.Body)
+	}
+	other := filepath.Join(path, "2026")
+	w := putConfig(h, getVersion(t, h), `{"admins":["boss@x"],"shares":[{"name":"g","path":"`+other+`","access":{}}]}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("new folder outside roots allowed: %d", w.Code)
+	}
+}

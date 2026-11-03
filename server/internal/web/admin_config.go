@@ -70,7 +70,18 @@ func (s *Server) adminPutConfig(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusBadRequest, "invalid config: "+err.Error())
 		return
 	}
+	// Only new or moved folders must be inside the roots. Existing shares
+	// stay editable (people, limits) even if their root was since removed.
+	s.mu.RLock()
+	existing := map[string]bool{}
+	for _, sh := range s.cfg.Shares {
+		existing[sh.Path] = true
+	}
+	s.mu.RUnlock()
 	for _, sh := range next.Shares {
+		if existing[sh.Path] {
+			continue
+		}
 		if err := s.checkShareFolder(sh.Path); err != nil {
 			httpError(w, http.StatusBadRequest, fmt.Sprintf("share %q: %v", sh.Name, err))
 			return

@@ -42,6 +42,7 @@ fn set_settings(s: settings::Settings) -> Res<()> {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct HostSnapshot {
     state: host::HostState,
     log: Vec<String>,

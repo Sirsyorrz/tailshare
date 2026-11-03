@@ -15,6 +15,7 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
     return { status, config: cfg.data.config, version: cfg.data.version };
   }, [base]);
   const [granting, setGranting] = useState<string | null>(null);
+  const [grantError, setGrantError] = useState("");
 
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data) return <div className="dim">Loading…</div>;
@@ -46,9 +47,10 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
       await call(base, "PUT", "/api/admin/config", cfg, cur.data.version);
       useStore.getState().say(`Gave viewer access to ${share}. Change it under Shares.`);
       setGranting(null);
+      setGrantError("");
       await reload();
     } catch (e) {
-      useStore.getState().say("Couldn't save: " + (e as Error).message);
+      setGrantError((e as Error).message);
     }
   };
 
@@ -114,7 +116,15 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
                             </option>
                           ))}
                         </select>
-                        <button onClick={() => setGranting(null)}>Cancel</button>
+                        <button
+                          onClick={() => {
+                            setGranting(null);
+                            setGrantError("");
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        {grantError && <div className="bad small">Couldn't save: {grantError}</div>}
                       </span>
                     ) : (
                       <button disabled={!config.shares.length} onClick={() => setGranting(String(p.userId))}>
