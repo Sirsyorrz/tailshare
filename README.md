@@ -4,7 +4,24 @@ Share folders with friends across tailnets. Friends open a web page through a sh
 Tailscale node, and tailshare uses their Tailscale identity for per-folder permissions,
 with no passwords. Not affiliated with Tailscale.
 
-Early stage: the headless server and web UI work; the desktop app is next.
+Early stage. The headless server, web UI and desktop app work; mounting as a
+drive and released builds are still to come.
+
+## Desktop app
+
+`app/` is a Tauri app that bundles the server. It can host from your computer
+(as its own Tailscale machine, approved once in the browser), finds every
+tailshare server on your tailnet, and gives admins a share editor (folders,
+people, presets, upload limits, expiry), a People page with policy warnings,
+the activity log and the trash.
+
+```
+cd app
+npm install
+npm run tauri dev
+```
+
+Needs Go, Rust and Node. `npm run server` builds the bundled server on its own.
 
 ## Run the server
 
