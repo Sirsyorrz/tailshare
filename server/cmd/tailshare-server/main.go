@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -128,8 +129,25 @@ func devMode(addr, user string) (*web.Server, func() error, error) {
 	return srv, func() error { return httpServer(srv.Handler()).Serve(ln) }, nil
 }
 
+// dedupLogf drops consecutive repeats; tsnet re-prints the login URL every
+// few seconds until it is approved.
+func dedupLogf() func(string, ...any) {
+	var mu sync.Mutex
+	var last string
+	return func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		mu.Lock()
+		defer mu.Unlock()
+		if msg == last {
+			return
+		}
+		last = msg
+		log.Print(msg)
+	}
+}
+
 func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool) (*web.Server, func() error, error) {
-	ts := &tsnet.Server{Hostname: hostname, Dir: filepath.Join(stateDir, "tsnet")}
+	ts := &tsnet.Server{Hostname: hostname, Dir: filepath.Join(stateDir, "tsnet"), UserLogf: dedupLogf()}
 	if verbose {
 		ts.Logf = log.Printf
 	}
@@ -151,6 +169,15 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Issuing the cert can take over a minute; do it now rather than inside
+	// the first visitor's TLS handshake, where browsers give up.
+	go func() {
+		if _, _, err := lc.CertPair(ctx, fqdn); err != nil {
+			log.Printf("fetching HTTPS cert: %v", err)
+			return
+		}
+		log.Printf("HTTPS cert ready")
+	}()
 
 	plain, err := ts.Listen("tcp", ":80")
 	if err != nil {
