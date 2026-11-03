@@ -1,0 +1,38 @@
+[package]
+name = "tailshare"
+version = "0.1.0"
+edition = "2021"
+# Room for a CLI bin next to the app, so bundling needs to know which is which.
+default-run = "tailshare-app"
+
+[lib]
+name = "tailshare"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tailshare-app"
+path = "src/bin/app.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+# Tauri serves devUrl unless this is on, in which case it serves the embedded
+# frontendDist. The Tauri CLI passes it for builds; plain `cargo build` will not.
+custom-protocol = ["tauri/custom-protocol"]
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2.11.0"
+tauri-plugin-process = "2.3.1"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+tauri-plugin-opener = "2"
+# Same reqwest/rustls the updater already pulls in, so no second TLS stack.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+futures = "0.3"
+url = "2"
