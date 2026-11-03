@@ -6,7 +6,7 @@ import { useStore } from "../state/store";
 
 /// Everyone the server can see: who has access, who accepted a share but
 /// has none yet, and who the tailnet policy is blocking.
-export function People({ base, nodeName }: { base: string; nodeName: string }) {
+export function People({ base }: { base: string }) {
   const { data, error, reload } = useLoad(async () => {
     const [status, cfg] = await Promise.all([
       get<AdminStatus>(base, "/api/admin/status"),
@@ -35,7 +35,7 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
   for (const p of status.peers) byUser.set(p.userId, [...(byUser.get(p.userId) ?? []), p]);
   const rows = [...byUser.values()].filter((ps) => ps.some((p) => p.hasAccess || p.external));
   const blocked = status.peers.some((p) => p.hasAccess && !p.canReach);
-  const grant = `{"src": ["autogroup:shared"], "dst": ["${nodeName}"], "ip": ["443"]}`;
+  const grant = status.grant ?? "";
 
   const give = async (userId: number, share: string) => {
     try {
@@ -59,8 +59,9 @@ export function People({ base, nodeName }: { base: string; nodeName: string }) {
       {blocked && (
         <div className="callout warn">
           <div>
-            Someone with access can't connect because of your tailnet policy. Add this grant in the Tailscale admin
-            console under Access controls:
+            Someone with access can't connect because of your tailnet policy (it only lets your own devices in). Add
+            this to the <code>"grants"</code> list in the policy file, in the Tailscale admin console under Access
+            controls:
             <pre className="snippet">{grant}</pre>
           </div>
           <button onClick={() => void writeText(grant).then(() => useStore.getState().say("Copied"))}>Copy</button>

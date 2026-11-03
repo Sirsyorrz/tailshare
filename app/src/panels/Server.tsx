@@ -15,7 +15,6 @@ export function Server({ server }: { server: ServerT }) {
   const [tab, setTab] = useState<Tab>(admin ? "shares" : "access");
   useEffect(() => setTab(admin ? "shares" : "access"), [server.base, admin]);
 
-  const host = new URL(server.base).hostname;
   const me = server.me;
   const tabs: [Tab, string][] = admin
     ? [
@@ -92,7 +91,7 @@ export function Server({ server }: { server: ServerT }) {
         {tab === "shares" && me && (
           <Shares base={server.base} myKeys={[`id:${me.user.id}`, me.user.login.toLowerCase()]} />
         )}
-        {tab === "people" && <People base={server.base} nodeName={host} />}
+        {tab === "people" && <People base={server.base} />}
         {tab === "activity" && <Activity base={server.base} />}
         {tab === "trash" && <Trash base={server.base} />}
       </div>

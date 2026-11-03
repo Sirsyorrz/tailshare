@@ -5,6 +5,7 @@ package reach
 
 import (
 	"context"
+	"encoding/json"
 	"net/netip"
 	"slices"
 	"strings"
@@ -26,16 +27,22 @@ type Peer struct {
 
 const tcp = 6
 
+type Report struct {
+	// Self is this node's Tailscale addresses.
+	Self  []string
+	Peers []Peer
+}
+
 // Check reports every peer and whether it may open TCP connections to port
 // on this node.
-func Check(ctx context.Context, lc *local.Client, port uint16) ([]Peer, error) {
+func Check(ctx context.Context, lc *local.Client, port uint16) (Report, error) {
 	st, err := lc.Status(ctx)
 	if err != nil {
-		return nil, err
+		return Report{}, err
 	}
 	rules, err := lc.DebugPacketFilterRules(ctx)
 	if err != nil {
-		return nil, err
+		return Report{}, err
 	}
 	var self []netip.Addr
 	if st.Self != nil {
@@ -65,7 +72,22 @@ func Check(ctx context.Context, lc *local.Client, port uint16) ([]Peer, error) {
 		out = append(out, peer)
 	}
 	slices.SortFunc(out, func(a, b Peer) int { return strings.Compare(a.Login+a.Node, b.Login+b.Node) })
-	return out, nil
+	rep := Report{Peers: out}
+	for _, ip := range self {
+		rep.Self = append(rep.Self, ip.String())
+	}
+	return rep, nil
+}
+
+// Grant is the policy-file grant that lets people a node is shared with
+// reach port 443 on it. Policy destinations must be addresses, tags or host
+// aliases; a machine name is rejected by the policy editor.
+func Grant(selfIPs []string) string {
+	if len(selfIPs) == 0 {
+		selfIPs = []string{"<this machine's Tailscale IP>"}
+	}
+	dst, _ := json.Marshal(selfIPs)
+	return `{"src": ["autogroup:shared"], "dst": ` + strings.ReplaceAll(string(dst), ",", ", ") + `, "ip": ["tcp:443"]}`
 }
 
 // Allowed reports whether any rule lets a source address reach a

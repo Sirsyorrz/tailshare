@@ -348,7 +348,7 @@ func tailscaleMode(ctx context.Context, stateDir, hostname string, verbose bool,
 		Hosts:    []string{fqdn},
 		HTTPS:    true,
 		Activity: act,
-		Reach:    func(ctx context.Context) ([]reach.Peer, error) { return reach.Check(ctx, lc, 443) },
+		Reach:    func(ctx context.Context) (reach.Report, error) { return reach.Check(ctx, lc, 443) },
 		Version:  version,
 	})
 	watch := newNodeWatch(lc, fqdn, func(name string) {

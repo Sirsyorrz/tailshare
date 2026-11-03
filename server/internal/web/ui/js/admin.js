@@ -79,8 +79,8 @@ async function renderStatus(box) {
       ? el(
           "p",
           { class: "dim" },
-          "Someone with access is blocked. Add a grant to your tailnet policy: ",
-          el("code", { text: '{"src": ["autogroup:shared"], "dst": ["<this node>"], "ip": ["443"]}' }),
+          "Someone with access is blocked by your tailnet policy. Add this to \"grants\" in the policy file (Tailscale admin console, Access controls): ",
+          el("code", { text: st.grant || "" }),
         )
       : null,
     el("h3", { text: "Shares" }),

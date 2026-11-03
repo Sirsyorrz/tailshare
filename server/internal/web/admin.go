@@ -55,10 +55,12 @@ type shareStatus struct {
 
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	out := struct {
-		Shares       []shareStatus `json:"shares"`
-		Peers        []peerStatus  `json:"peers"`
-		PolicyKnown  bool          `json:"policyKnown"`
-		MinFreeBytes int64         `json:"minFreeBytes"`
+		Shares      []shareStatus `json:"shares"`
+		Peers       []peerStatus  `json:"peers"`
+		PolicyKnown bool          `json:"policyKnown"`
+		// Grant is what to add to the tailnet policy for blocked friends.
+		Grant        string `json:"grant,omitempty"`
+		MinFreeBytes int64  `json:"minFreeBytes"`
 	}{Shares: []shareStatus{}, Peers: []peerStatus{}}
 
 	s.mu.RLock()
@@ -77,9 +79,10 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	if s.opt.Reach != nil {
-		if peers, err := s.opt.Reach(r.Context()); err == nil {
+		if rep, err := s.opt.Reach(r.Context()); err == nil {
 			out.PolicyKnown = true
-			for _, p := range peers {
+			out.Grant = reach.Grant(rep.Self)
+			for _, p := range rep.Peers {
 				out.Peers = append(out.Peers, peerStatus{Peer: p, HasAccess: s.hasAnyAccess(p.UserID, p.Login)})
 			}
 		}

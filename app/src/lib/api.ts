@@ -92,6 +92,7 @@ export interface AdminStatus {
   shares: { name: string; path: string; readOnly: boolean; online: boolean; freeBytes: number; trashCount: number }[];
   peers: PeerStatus[];
   policyKnown: boolean;
+  grant?: string;
   minFreeBytes: number;
 }
 

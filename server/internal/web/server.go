@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,7 +33,7 @@ type Options struct {
 	Activity *activity.Log
 	// Reach reports which peers the Tailscale policy lets connect. Nil in
 	// dev mode.
-	Reach func(context.Context) ([]reach.Peer, error)
+	Reach func(context.Context) (reach.Report, error)
 	// ConfigPath is where admin edits are saved. Empty disables editing.
 	ConfigPath string
 	// Roots are the only folders shares may be created in.
@@ -145,12 +146,12 @@ func (s *Server) checkReach(ctx context.Context, last map[string]string) {
 			log.Printf("policy check crashed: %v", r)
 		}
 	}()
-	peers, err := s.opt.Reach(ctx)
+	rep, err := s.opt.Reach(ctx)
 	if err != nil {
 		log.Printf("policy check: %v", err)
 		return
 	}
-	for _, p := range peers {
+	for _, p := range rep.Peers {
 		key := p.Login + "|" + p.Node
 		state := ""
 		hasAccess := s.hasAnyAccess(p.UserID, p.Login)
@@ -166,12 +167,12 @@ func (s *Server) checkReach(ctx context.Context, last map[string]string) {
 		last[key] = state
 		switch state {
 		case "blocked":
-			src := p.Login
-			if p.External {
-				src = "autogroup:shared"
+			grant := reach.Grant(rep.Self)
+			if !p.External {
+				grant = strings.Replace(grant, `"autogroup:shared"`, strconv.Quote(p.Login), 1)
 			}
 			log.Printf("WARNING: %s (%s) has access to shares, but the tailnet policy blocks their device from port 443. "+
-				"Add a grant like {\"src\": [%q], \"dst\": [\"<this node>\"], \"ip\": [\"443\"]}.", p.Login, p.Node, src)
+				"Add this to \"grants\" in the tailnet policy file: %s", p.Login, p.Node, grant)
 		case "no-access":
 			log.Printf("%s (id:%d) can reach tailshare but has no access to any share yet", p.Login, p.UserID)
 		}
