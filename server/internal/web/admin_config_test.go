@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -21,7 +23,7 @@ func adminServer(t *testing.T) (http.Handler, string, string) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
 	cfg.Save(cfgPath)
-	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
 	s.Configure(cfgPath, []string{root}, "")
 	s.Load(cfg)
 	return s.Handler(), root, cfgPath
@@ -50,7 +52,7 @@ func putConfig(h http.Handler, version, body string) *httptest.ResponseRecorder 
 func TestConfigUpdate(t *testing.T) {
 	h, root, cfgPath := adminServer(t)
 	v := getVersion(t, h)
-	good := `{"admins":["boss@x"],"shares":[{"name":"footage","path":"` + filepath.Join(root, "footage") + `","access":{"id:7":"contributor"}}]}`
+	good := `{"admins":["boss@x"],"shares":[{"name":"footage","path":` + jsonPath(filepath.Join(root, "footage")) + `,"access":{"id:7":"contributor"}}]}`
 
 	if w := putConfig(h, "stale", good); w.Code != http.StatusPreconditionFailed {
 		t.Errorf("stale version: %d", w.Code)
@@ -62,7 +64,7 @@ func TestConfigUpdate(t *testing.T) {
 		t.Errorf("share outside roots allowed: %d", w.Code)
 	}
 	os.Symlink("/etc", filepath.Join(root, "sneaky"))
-	if w := putConfig(h, v, `{"admins":["boss@x"],"shares":[{"name":"s","path":"`+filepath.Join(root, "sneaky")+`","access":{}}]}`); w.Code != http.StatusBadRequest {
+	if w := putConfig(h, v, `{"admins":["boss@x"],"shares":[{"name":"s","path":`+jsonPath(filepath.Join(root, "sneaky"))+`,"access":{}}]}`); w.Code != http.StatusBadRequest {
 		t.Errorf("symlink out of root allowed: %d", w.Code)
 	}
 	w := putConfig(h, v, good)
@@ -81,14 +83,20 @@ func TestConfigUpdate(t *testing.T) {
 	}
 }
 
+func browseDirs(h http.Handler, path string) []string {
+	var out browseResult
+	w := do(h, req("GET", "/api/admin/browse?path="+url.QueryEscape(path), nil, nil))
+	json.Unmarshal(w.Body.Bytes(), &out)
+	return out.Dirs
+}
+
 func TestBrowse(t *testing.T) {
 	h, root, _ := adminServer(t)
 	real, _ := filepath.EvalSymlinks(root)
-	w := do(h, req("GET", "/api/admin/browse", nil, nil))
-	if !strings.Contains(w.Body.String(), real) {
-		t.Errorf("roots not listed: %s", w.Body)
+	if dirs := browseDirs(h, ""); !slices.Contains(dirs, real) {
+		t.Errorf("roots not listed: %v, want %s", dirs, real)
 	}
-	w = do(h, req("GET", "/api/admin/browse?path="+filepath.Join(root, "footage"), nil, nil))
+	w := do(h, req("GET", "/api/admin/browse?path="+url.QueryEscape(filepath.Join(root, "footage")), nil, nil))
 	var out browseResult
 	json.Unmarshal(w.Body.Bytes(), &out)
 	if len(out.Dirs) != 1 || out.Dirs[0] != "2026" || out.Parent != real {
@@ -102,7 +110,7 @@ func TestBrowse(t *testing.T) {
 func TestConfigEndpointsAdminOnly(t *testing.T) {
 	_, _, cfgPath := adminServer(t)
 	cfg, _ := config.Load(cfgPath)
-	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 2, Login: "friend@x"}}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 2, Login: "friend@x"}}, Hosts: []string{host}, HTTPS: true})
 	s.Configure(cfgPath, []string{"/"}, "")
 	s.Load(cfg)
 	h := s.Handler()
@@ -120,17 +128,17 @@ func TestRootsFileIsLive(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
 	cfg.Save(cfgPath)
-	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
 	s.Configure(cfgPath, nil, rootsFile)
 	s.Load(cfg)
 	h := s.Handler()
-	if w := do(h, req("GET", "/api/admin/browse", nil, nil)); strings.Contains(w.Body.String(), root) {
+	real, _ := filepath.EvalSymlinks(root)
+	if slices.Contains(browseDirs(h, ""), real) {
 		t.Fatal("root listed before it was added")
 	}
 	os.WriteFile(rootsFile, []byte(root+"\n"), 0o600)
-	real, _ := filepath.EvalSymlinks(root)
-	if w := do(h, req("GET", "/api/admin/browse", nil, nil)); !strings.Contains(w.Body.String(), real) {
-		t.Fatalf("root added at runtime not picked up: %s", w.Body)
+	if dirs := browseDirs(h, ""); !slices.Contains(dirs, real) {
+		t.Fatalf("root added at runtime not picked up: %v, want %s", dirs, real)
 	}
 }
 
@@ -142,14 +150,14 @@ func TestExistingShareEditableAfterRootRemoved(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.json")
 	cfg, _ := config.Parse([]byte(`{"admins":["boss@x"],"shares":[]}`))
 	cfg.Save(cfgPath)
-	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 1, Login: "boss@x"}}, Hosts: []string{host}, HTTPS: true})
 	s.Configure(cfgPath, nil, rootsFile)
 	s.Load(cfg)
 	h := s.Handler()
 
 	path := filepath.Join(root, "footage")
 	share := func(who string) string {
-		return `{"admins":["boss@x"],"shares":[{"name":"f","path":"` + path + `","access":{"` + who + `":"viewer"}}]}`
+		return `{"admins":["boss@x"],"shares":[{"name":"f","path":` + jsonPath(path) + `,"access":{"` + who + `":"viewer"}}]}`
 	}
 	if w := putConfig(h, getVersion(t, h), share("a@x")); w.Code != 200 {
 		t.Fatalf("create: %d %s", w.Code, w.Body)
@@ -159,7 +167,7 @@ func TestExistingShareEditableAfterRootRemoved(t *testing.T) {
 		t.Fatalf("editing an existing share after its root was removed: %d %s", w.Code, w.Body)
 	}
 	other := filepath.Join(path, "2026")
-	w := putConfig(h, getVersion(t, h), `{"admins":["boss@x"],"shares":[{"name":"g","path":"`+other+`","access":{}}]}`)
+	w := putConfig(h, getVersion(t, h), `{"admins":["boss@x"],"shares":[{"name":"g","path":`+jsonPath(other)+`,"access":{}}]}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("new folder outside roots allowed: %d", w.Code)
 	}

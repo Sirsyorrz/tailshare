@@ -3,14 +3,21 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Sirsyorrz/tailshare/server/internal/perm"
 )
 
+// absX is an absolute path on this OS; "/x" isn't one on Windows.
+var absX = map[bool]string{true: "C:/x", false: "/x"}[runtime.GOOS == "windows"]
+
+// load reads a config where "/x" stands for absX.
 func load(t *testing.T, js string) (*Config, error) {
 	t.Helper()
+	js = strings.ReplaceAll(js, `"/x"`, `"`+absX+`"`)
 	p := filepath.Join(t.TempDir(), "c.json")
 	os.WriteFile(p, []byte(js), 0o600)
 	return Load(p)

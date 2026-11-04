@@ -21,6 +21,22 @@ import (
 
 const host = "tailshare.example.ts.net"
 
+// newServer closes its shares when the test ends, before TempDir cleanup;
+// Windows won't delete a folder that's still open.
+func newServer(t *testing.T, o Options) *Server {
+	t.Helper()
+	s := New(o)
+	t.Cleanup(s.Close)
+	return s
+}
+
+// jsonPath quotes p for pasting into a JSON document; Windows paths have
+// backslashes that would otherwise be read as escapes.
+func jsonPath(p string) string {
+	b, _ := json.Marshal(p)
+	return string(b)
+}
+
 func setup(t *testing.T) (http.Handler, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -32,7 +48,7 @@ func setup(t *testing.T) (http.Handler, string) {
 		}},
 		{Name: "secret", Path: t.TempDir(), Access: map[string]perm.Set{"owner@x": perm.Presets["editor"]}},
 	}}
-	s := New(Options{Resolver: identity.Fixed{User: identity.User{ID: 7, Login: "friend@x", Node: "pc"}}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 7, Login: "friend@x", Node: "pc"}}, Hosts: []string{host}, HTTPS: true})
 	s.Load(cfg)
 	return s.Handler(), dir
 }
@@ -149,7 +165,7 @@ func TestDownloadHeaders(t *testing.T) {
 
 func serverAs(t *testing.T, u identity.User, cfg *config.Config) http.Handler {
 	t.Helper()
-	s := New(Options{Resolver: identity.Fixed{User: u}, Hosts: []string{host}, HTTPS: true})
+	s := newServer(t, Options{Resolver: identity.Fixed{User: u}, Hosts: []string{host}, HTTPS: true})
 	s.Load(cfg)
 	return s.Handler()
 }

@@ -141,6 +141,17 @@ func (s *Server) Load(cfg *config.Config) {
 	log.Printf("loaded %d share(s)", len(next))
 }
 
+// Close releases every share's folder. Windows can't delete or rename a
+// folder while it's held open.
+func (s *Server) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sh := range s.shares {
+		sh.Close()
+	}
+	s.shares = nil
+}
+
 // sameDir normalises a folder path so two spellings of it compare equal.
 func sameDir(p string) string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {

@@ -9,17 +9,18 @@ import (
 )
 
 func TestRemovedShareIsCleanedUp(t *testing.T) {
-	a, b := t.TempDir(), t.TempDir()
+	// All made before the server, so cleanup closes it before removing them.
+	a, b, c := t.TempDir(), t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(a, "keep.txt"), []byte("x"), 0o644)
 	meta := func(dir string) bool { _, err := os.Stat(filepath.Join(dir, ".tailshare")); return err == nil }
-	s := New(Options{Hosts: []string{host}})
+	s := newServer(t, Options{Hosts: []string{host}})
 
 	s.Load(&config.Config{Shares: []config.Share{{Name: "a", Path: a}, {Name: "b", Path: b}}})
 	if !meta(a) || !meta(b) {
 		t.Fatal("shares should have their data folder")
 	}
 	// Renamed, same folder: kept.
-	s.Load(&config.Config{Shares: []config.Share{{Name: "renamed", Path: a + "/"}, {Name: "b", Path: b}}})
+	s.Load(&config.Config{Shares: []config.Share{{Name: "renamed", Path: a + string(filepath.Separator)}, {Name: "b", Path: b}}})
 	if !meta(a) {
 		t.Fatal("renaming a share must not wipe its trash")
 	}
@@ -32,7 +33,6 @@ func TestRemovedShareIsCleanedUp(t *testing.T) {
 		t.Error("user file removed")
 	}
 	// Moved to another folder: the old one is cleaned.
-	c := t.TempDir()
 	s.Load(&config.Config{Shares: []config.Share{{Name: "b", Path: c}}})
 	if meta(b) || !meta(c) {
 		t.Error("changing the folder should move the data folder")
@@ -42,7 +42,7 @@ func TestRemovedShareIsCleanedUp(t *testing.T) {
 func TestCleanupDoesNotFollowSymlink(t *testing.T) {
 	a, victim := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(victim, "precious"), []byte("x"), 0o644)
-	s := New(Options{Hosts: []string{host}})
+	s := newServer(t, Options{Hosts: []string{host}})
 	s.Load(&config.Config{Shares: []config.Share{{Name: "a", Path: a}}})
 	os.RemoveAll(filepath.Join(a, ".tailshare"))
 	if err := os.Symlink(victim, filepath.Join(a, ".tailshare")); err != nil {
