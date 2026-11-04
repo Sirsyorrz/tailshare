@@ -1,9 +1,9 @@
 name: build
 
+# Checks only run when asked for, or from release.yml before a release is
+# built. A manual run also bundles test installers as artifacts.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 env:
@@ -70,12 +70,12 @@ jobs:
         working-directory: app
         run: npx tsc --noEmit
 
-  # Packaging needs the signing key, because declaring an updater pubkey makes
-  # every bundle a signed one. Fork pull requests cannot see secrets, so they
-  # only run the tests.
+  # Skipped when called from release.yml, which bundles for itself. Needs the
+  # signing key, because declaring an updater pubkey makes every bundle a
+  # signed one.
   bundle:
     needs: test
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
