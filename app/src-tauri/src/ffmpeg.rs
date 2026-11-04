@@ -34,7 +34,10 @@ const BUILD: Option<Build> = Some(Build {
     size: 80_733_362,
 });
 
-#[cfg(not(any(all(target_os = "linux", target_arch = "x86_64"), all(windows, target_arch = "x86_64"))))]
+#[cfg(not(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(windows, target_arch = "x86_64")
+)))]
 const BUILD: Option<Build> = None;
 
 fn dir() -> PathBuf {
@@ -76,7 +79,8 @@ pub async fn install(app: &AppHandle) -> anyhow::Result<()> {
     let Some(build) = BUILD else { bail!("no ffmpeg download for this platform") };
     let data = crate::data_dir();
     std::fs::create_dir_all(&data)?;
-    let archive = data.join(if cfg!(windows) { "ffmpeg-download.zip" } else { "ffmpeg-download.tar.xz" });
+    let archive =
+        data.join(if cfg!(windows) { "ffmpeg-download.zip" } else { "ffmpeg-download.tar.xz" });
     let staging = data.join("ffmpeg-staging");
     let result = download(app, &build, &archive).await.and_then(|()| unpack(&archive, &staging));
     let _ = std::fs::remove_file(&archive);
@@ -137,7 +141,11 @@ fn unpack(archive: &Path, staging: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(&new)?;
     std::fs::rename(top.join("bin"), new.join("bin"))?;
     for extra in ["ffplay", "ffprobe"] {
-        let _ = std::fs::remove_file(new.join("bin").join(if cfg!(windows) { format!("{extra}.exe") } else { extra.into() }));
+        let _ = std::fs::remove_file(new.join("bin").join(if cfg!(windows) {
+            format!("{extra}.exe")
+        } else {
+            extra.into()
+        }));
     }
     if cfg!(not(windows)) {
         std::fs::rename(top.join("lib"), new.join("lib"))?;
