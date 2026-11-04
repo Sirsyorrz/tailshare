@@ -78,6 +78,7 @@ export function Host() {
   const registered = useStore((s) => s.registered);
   const [busy, setBusy] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
   const [name, setName] = useState("");
   const background = useStore((s) => s.background);
   const bgSupported = useStore((s) => s.backgroundSupported);
@@ -301,30 +302,42 @@ export function Host() {
                 <button onClick={() => void openUrl(machinesURL)}>Open admin console</button>
               </div>
             </li>
-            <li>
-              Only if you've edited your tailnet policy: the default one lets anyone you share with in, but a stricter
-              one can block them. In that case add this to the <code>"grants"</code> list in the policy file, in the
-              Tailscale admin console under Access controls:
-              <div className="callout">
-                <div>
-                  {grant ? (
-                    <PolicyGrant grant={grant} />
-                  ) : grant === null ? (
-                    <span className="dim small">Waiting for the server to work out this machine's grant…</span>
-                  ) : (
-                    <span className="dim small">
-                      This server can't read the tailnet policy, so it can't suggest a grant. People under Manage
-                      shares shows who is blocked.
-                    </span>
-                  )}
-                </div>
-              </div>
-            </li>
             <li>They open {host.url} once in their browser.</li>
             <li>
               They then show up under <b>Manage shares</b> (People), where you give them access to folders.
             </li>
           </ol>
+          <p className="dim small">
+            They can only reach this tailshare machine, not the rest of this computer or your tailnet, and on it only
+            port 443 (port 80 just redirects there). The default tailnet policy lets them in, so there's nothing to
+            change.
+          </p>
+          <h3>
+            <button className="link" onClick={() => setShowPolicy(!showPolicy)}>
+              {showPolicy ? "Hide" : "Show"} tailnet policy options
+            </button>
+          </h3>
+          {showPolicy && (
+            <div className="steps">
+              <p>
+                Only needed if you've made your policy stricter, or want to be extra safe. If people you share with get
+                blocked, <b>Manage shares</b> (People) says so. Add this to the <code>"grants"</code> list in the policy
+                file (admin console, Access controls) to let them reach tailshare's HTTPS port:
+              </p>
+              {grant ? (
+                <PolicyGrant grant={grant} />
+              ) : grant === null ? (
+                <div className="dim small">Waiting for the server to work out this machine's grant…</div>
+              ) : (
+                <div className="dim small">This server can't read the tailnet policy, so it can't suggest a grant.</div>
+              )}
+              <p className="dim small">
+                Grants only ever add access. To limit shared users to this grant, also change any rule with{" "}
+                <code>"src": ["*"]</code> to <code>"src": ["autogroup:member"]</code>, which covers everyone in your
+                tailnet but not people you share with.
+              </p>
+            </div>
+          )}
         </>
       )}
 

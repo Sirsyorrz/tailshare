@@ -75,15 +75,33 @@ plus delete.
 ## Sharing with a friend
 
 1. In the Tailscale admin console, share the `tailshare` machine with them.
-2. The default tailnet policy already lets shared users in. If you've made it
-   stricter, add a grant that lets them reach port 443 on tailshare:
-   ```json
-   {"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["tcp:443"]}
-   ```
-   The desktop app and server log suggest the exact grant for your node.
-3. They open `https://tailshare.<your-tailnet>.ts.net` once. They then show up
+2. They open `https://tailshare.<your-tailnet>.ts.net` once. They then show up
    in the app's People page (or the admin Status page) with their `id:`; give
    them access there or add them to `access` in the config.
+
+The default tailnet policy lets shared users in, so no policy change is needed.
+
+### What a shared user can reach
+
+tailshare runs as its own Tailscale machine inside the server process, with its
+own network stack. Sharing it exposes only that machine, not the computer it
+runs on or the rest of your tailnet, and it only listens on 443 (tailshare) and
+80 (redirects to 443). There is no Tailscale SSH and nothing is forwarded to
+the host. Once connected, people only see the shares and permissions you gave
+them, and file access is confined to each share's folder.
+
+### Tailnet policy (optional)
+
+Only needed if your policy is stricter than the default, or you want to be
+extra safe. Add a grant that lets shared users reach tailshare's HTTPS port:
+
+```json
+{"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["tcp:443"]}
+```
+
+The desktop app and server log suggest the exact grant for your node. Grants
+only add access, so to limit shared users to this grant also change any
+`"src": ["*"]` rule to `"src": ["autogroup:member"]`.
 
 If someone has access but the policy blocks them, they're flagged as "blocked by
 tailnet policy". The server works this out from the packet filter Tailscale
