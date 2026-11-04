@@ -95,6 +95,51 @@ pub fn support() -> Option<String> {
     None
 }
 
+// Pinned like the bundled rclone; the hash is the one GitHub publishes for
+// the release asset. To update: bump both from the latest winfsp release.
+const WINFSP_URL: &str =
+    "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi";
+const WINFSP_SHA256: &str = "073a70e00f77423e34bed98b86e600def93393ba5822204fac57a29324db9f7a";
+
+/// Downloads the pinned WinFsp installer and runs it. msiexec asks for admin
+/// rights itself (UAC) because WinFsp installs per machine.
+pub async fn install_winfsp() -> anyhow::Result<()> {
+    if !cfg!(windows) {
+        bail!("WinFsp is only for Windows");
+    }
+    let r = crate::api::web_client().get(WINFSP_URL).send().await?.error_for_status()?;
+    let msi = r.bytes().await?;
+    use sha2::Digest;
+    let got: String = sha2::Sha256::digest(&msi).iter().map(|b| format!("{b:02x}")).collect();
+    if got != WINFSP_SHA256 {
+        bail!("WinFsp download didn't match the expected checksum");
+    }
+    let path = std::env::temp_dir().join(format!("tailshare-winfsp-{}.msi", random_hex(6)?));
+    std::fs::write(&path, &msi)?;
+    let status = tauri::async_runtime::spawn_blocking({
+        let path = path.clone();
+        move || {
+            std::process::Command::new("msiexec")
+                .arg("/i")
+                .arg(&path)
+                .args(["/passive", "/norestart"])
+                .status()
+        }
+    })
+    .await?;
+    let _ = std::fs::remove_file(&path);
+    match status.context("starting msiexec")?.code() {
+        Some(0) | Some(3010) => {}
+        Some(1602) => bail!("installation was cancelled"),
+        Some(c) => bail!("WinFsp installer failed (code {c})"),
+        None => bail!("WinFsp installer was stopped"),
+    }
+    if support().is_some() {
+        bail!("WinFsp installed but wasn't found; try restarting tailshare");
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 fn fusermount() -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;

@@ -4,12 +4,30 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use url::Url;
 
+fn install_crypto() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
+/// For downloads from the public internet, which unlike tailnet traffic
+/// should respect a system proxy.
+pub(crate) fn web_client() -> &'static reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| {
+        install_crypto();
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(300))
+            .build()
+            .expect("http client")
+    })
+}
+
 pub(crate) fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
-        if rustls::crypto::CryptoProvider::get_default().is_none() {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        }
+        install_crypto();
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(4))
             // Tailnet traffic must never go through a system proxy.

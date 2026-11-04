@@ -181,21 +181,51 @@ function MountDialog({
 }
 
 function MissingSupport({ missing }: { missing: "winfsp" | "fuse" }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const install = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await invoke("install_winfsp");
+      useStore.getState().say("WinFsp installed");
+      await useStore.getState().loadDrives();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (missing === "winfsp") {
     return (
       <div>
         <p>
-          Mounting needs <b>WinFsp</b>, a free filesystem driver for Windows. Install it, then try again (no restart
-          needed).
+          Mounting needs <b>WinFsp</b>, a free filesystem driver for Windows. tailshare can download and install it
+          for you; Windows will ask for permission. No restart needed.
         </p>
-        <button onClick={() => void openUrl("https://winfsp.dev/rel/")}>Get WinFsp</button>
+        <div className="row tight">
+          <button className="primary" disabled={busy} onClick={() => void install()}>
+            {busy ? "Installing…" : "Install WinFsp"}
+          </button>
+          <button className="link small" onClick={() => void openUrl("https://winfsp.dev/rel/")}>
+            or download it yourself
+          </button>
+        </div>
+        {error && <div className="bad small">{error}</div>}
       </div>
     );
   }
   return (
-    <p>
-      Mounting needs FUSE. Install your distribution's <code>fuse3</code> package, then try again.
-    </p>
+    <div>
+      <p>Mounting needs FUSE, which your distribution provides. Install it, then try again:</p>
+      <pre className="small">
+        {"sudo apt install fuse3      # Debian, Ubuntu, Mint\n" +
+          "sudo dnf install fuse3      # Fedora\n" +
+          "sudo pacman -S fuse3        # Arch"}
+      </pre>
+    </div>
   );
 }
 

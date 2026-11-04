@@ -198,6 +198,11 @@ async fn drive_unmount(base: String, share: String, d: State<'_, drives::Drives>
     settings::save(&s).map_err(err)
 }
 
+#[tauri::command]
+async fn install_winfsp() -> Res<()> {
+    drives::install_winfsp().await.map_err(err)
+}
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer hard-crashes with a Wayland protocol error on
     // NVIDIA. Must be set before GTK initialises.
@@ -260,6 +265,7 @@ fn main() {
             drive_suggest,
             drive_mount,
             drive_unmount,
+            install_winfsp,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
