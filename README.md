@@ -193,3 +193,9 @@ To run the server without Tailscale:
 ```
 
 Plain HTTP on loopback; every request is treated as `-dev-user`.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Bundled and downloadable components (rclone,
+WinFsp, FFmpeg) are under their own licences, listed in
+[LICENSE-THIRD-PARTY.md](LICENSE-THIRD-PARTY.md).
