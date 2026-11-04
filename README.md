@@ -1,84 +1,118 @@
 # tailshare
 
-Share folders with friends across tailnets. Friends open a web page through a shared
-Tailscale node, and tailshare uses their Tailscale identity for per-folder permissions,
-with no passwords. Not affiliated with Tailscale.
+Share folders with friends across tailnets. Friends open a web page through a
+shared Tailscale node, and tailshare uses their Tailscale identity for
+per-folder permissions. No accounts, no passwords.
 
-Early stage. The headless server, web UI and desktop app (including mounting
-shares as drives) work; released builds are still to come.
+Not affiliated with Tailscale.
+
+> Early stage. The server, web UI and desktop app (including mounting shares as
+> drives) work
+
+## How it works
+
+The server runs as its own machine on your tailnet (`tailshare` by default) and
+serves `https://tailshare.<tailnet>.ts.net`. You share that machine with friends
+from the Tailscale admin console; when they open the page, Tailscale tells the
+server who they are, and the config decides what they can do in each folder.
 
 ## Web UI
 
-What friends see. It works like a file manager: details and thumbnail views,
-sorting by name, date, type or size, type filters, search in the current
-folder (Enter searches subfolders too), multi-select with Ctrl/Shift and
-checkboxes, right-click menus, drag items onto folders or the breadcrumbs to
-move them, a preview lightbox for images, video, audio and text, uploads of
-files or whole folders (resumable, any size), and zip downloads of any
-selection. Back/forward and reloads keep your place.
+What friends see. It works like a file manager:
 
-Thumbnails need download permission. Video thumbnails, and HEIC/AVIF photos,
-need `ffmpeg` on the server's PATH; without it those show an icon.
+- details and thumbnail views, sorting, type filters
+- search in the current folder (Enter searches subfolders too)
+- multi-select (Ctrl/Shift, checkboxes), right-click menus, drag to move
+- preview for images, video, audio and text
+- resumable uploads of files or whole folders, any size
+- zip downloads of any selection
+- changes made elsewhere (drives, other people, the server's disk) show up
+  within a few seconds
+
+Thumbnails need download permission. Video thumbnails and HEIC/AVIF photos need
+ffmpeg on the server; without it those show an icon. When hosting from the
+desktop app, "Video thumbnails" on the Host page downloads it (LGPL build,
+about 65 to 80 MB). A headless server uses `-ffmpeg` or the one on PATH.
 
 ## Desktop app
 
-`app/` is a Tauri app that bundles the server. It can host from your computer
-(as its own Tailscale machine, approved once in the browser), finds every
-tailshare server on your tailnet, and gives admins a share editor (folders,
-people, presets, upload limits, expiry), a People page with policy warnings,
-the activity log and the trash.
+`app/` is a Tauri app that bundles the server. It can:
 
-```
-cd app
-npm install
-npm run tauri dev
-```
-
-Needs Go, Rust and Node. `npm run server` builds the bundled server on its own.
+- host from your computer as its own Tailscale machine (approved once in the browser)
+- find every tailshare server on your tailnet
+- edit shares: folders, people, presets, upload limits, expiry
+- show people, policy warnings, the activity log and the trash
+- mount shares as drives
 
 "Keep hosting when tailshare is closed" moves the server into a systemd user
 service (Linux, with lingering so it starts at boot) or a hidden logon task
-(Windows). The app then follows it through `status.json` and `server.log` in
-its state folder.
+(Windows).
 
 ### Drives
 
-Any share you can see and download from can be mounted from the app ("Your
-access", then Mount): a drive letter on Windows, an empty folder on Linux. Every
-program can then open and save files on it directly. The app bundles
-[rclone](https://rclone.org), which talks WebDAV to the server's `/dav/`
-endpoint under the same permissions, quotas, trash and activity log as the web
-UI.
+Any share you can view and download from can be mounted from "Your access" →
+Mount: a drive letter on Windows, an empty folder on Linux. Any program can then
+open and save files on it directly. The app bundles [rclone](https://rclone.org),
+which talks WebDAV to the server's `/dav/` endpoint under the same permissions,
+quotas, trash and activity log as the web UI.
 
-Files you open are cached on your computer (20 GB by default, set on the Drives
-page). Saves upload in the background a few seconds after the file is closed;
-the "Drives & transfers" page shows progress, what's queued and anything the
-server refused. Unfinished uploads survive unmounting, quitting and crashes,
-and continue the next time the drive is mounted. Changes made by other people
-show up within about 20 seconds.
+- Opened files are cached locally (20 GB by default, set on the Drives page).
+- Saves upload in the background a few seconds after the file is closed. The
+  "Drives & transfers" page shows progress, the queue and anything the server
+  refused.
+- Unfinished uploads survive unmounting, quitting and crashes.
+- Changes by other people show up within about 20 seconds.
 
-Windows needs [WinFsp](https://winfsp.dev/rel/) installed once; Linux needs
-FUSE (`fuse3`). Upload-only shares can't be mounted. Moving files between two
-shares on a drive is a copy plus delete, not a rename.
+Mounting uses a filesystem driver from the OS: [WinFsp](https://winfsp.dev) on
+Windows, FUSE (`fuse3`) on Linux. Nothing else in the app needs them. If
+WinFsp is missing, the app offers to download and install it (one UAC prompt).
+FUSE comes with most desktop distros; if it's missing, the app shows the
+install command.
 
-`npm run rclone` downloads the bundled rclone; its checksums are pinned in
-`app/scripts/fetch-rclone.mjs`.
+Upload-only shares can't be mounted. Moving files between two shares is a copy
+plus delete.
 
-## Run the server
+## Sharing with a friend
 
-Needs Go 1.24+ and a tailnet with MagicDNS and HTTPS certificates enabled.
+1. In the Tailscale admin console, share the `tailshare` machine with them.
+2. Let shared users reach port 443 only. Add a grant to the tailnet policy file:
+   ```json
+   {"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["tcp:443"]}
+   ```
+   The desktop app and server log suggest the exact grant for your node.
+3. They open `https://tailshare.<your-tailnet>.ts.net` once. They then show up
+   in the app's People page (or the admin Status page) with their `id:`; give
+   them access there or add them to `access` in the config.
 
-```
+If someone has access but the policy blocks them, they're flagged as "blocked by
+tailnet policy". The server works this out from the packet filter Tailscale
+sends the node, so no API key is needed.
+
+## Headless server
+
+Needs Go 1.27+ and a tailnet with MagicDNS and HTTPS certificates enabled.
+
+```sh
 cd server
 go build -o tailshare-server ./cmd/tailshare-server
-./tailshare-server
+./tailshare-server -bootstrap-admin you@github
 ```
 
-On first run it prints a Tailscale login URL. Approve it and the node `tailshare`
-joins your tailnet, then it serves `https://tailshare.<tailnet>.ts.net`.
+On first run it prints a Tailscale login URL. Approve it and the node joins your
+tailnet.
 
-State (node identity and `config.json`) lives in `~/.config/tailshare` unless
-`-state` is given. Reload config with `kill -HUP <pid>`.
+| Flag | Meaning |
+|---|---|
+| `-state <dir>` | State directory (default `~/.config/tailshare`) |
+| `-config <file>` | Config file (default `<state>/config.json`) |
+| `-hostname <name>` | Tailscale machine name (default `tailshare`) |
+| `-roots a,b` | Folders the admin API may turn into shares (default: home folder) |
+| `-roots-file <file>` | More allowed folders, one per line, re-read on every use |
+| `-bootstrap-admin <user>` | Admin to add when the config has none |
+| `-ffmpeg <path>` | ffmpeg for thumbnails, tried before PATH |
+
+On Linux/macOS, `kill -HUP <pid>` reloads the config and `kill -USR1 <pid>`
+dumps the peers and access rules the node currently sees.
 
 ## Config
 
@@ -102,9 +136,9 @@ State (node identity and `config.json`) lives in `~/.config/tailshare` unless
 }
 ```
 
-Users are Tailscale login names or `id:<userid>` (preferred, since login names can
-change). The server logs each new identity it sees (`identity login=... id=...`),
-and the admin Status page lists people who accepted a share with their `id:`.
+Users are Tailscale login names or `id:<userid>`. Prefer `id:`, since login
+names can change. The server logs each new identity it sees
+(`identity login=... id=...`).
 
 | Preset | Permissions |
 |---|---|
@@ -114,48 +148,48 @@ and the admin Status page lists people who accepted a share with their `id:`.
 | `dropbox` | upload only |
 
 Individual permissions: `view`, `download`, `upload`, `mkdir`, `overwrite`,
-`rename`, `delete`, `deleteOwn` (only things they uploaded or created). Presets and
-names can be mixed in a list.
+`rename`, `delete`, `deleteOwn` (only things they uploaded or created). Presets
+and permissions can be mixed in a list.
 
 | Option | Meaning |
 |---|---|
-| `admins` | Logins that get the admin pages (status, activity, trash). Only from devices in your own tailnet unless `allowExternalAdmins` is true. |
+| `admins` | Users who get the admin pages. Only from devices in your own tailnet unless `allowExternalAdmins` is true. |
 | `minFreeGB` | Refuse uploads that would leave less than this free on a share's disk. Default 5. |
 | `readOnly` | Strip every write permission on the share. |
-| `quotaGB` | Per user cap on what they have uploaded into the share. |
+| `quotaGB` | Per-user cap on what they've uploaded into the share. |
 | `expires` | Last day (inclusive) of a user's access, or an RFC 3339 time. |
 
 ## Files on disk
 
-Each share gets a hidden `.tailshare/` folder: unfinished uploads, trash (kept 30
-days, restorable from the admin Trash page), `owners.json` (who uploaded what)
-and cached thumbnails (remade after 60 days; read-only shares don't
-cache).
-Only the shared folder itself gets one, not its subfolders. When a share is
-removed or moved to another folder, the old folder's `.tailshare/` is deleted,
-trash included (the app warns first). The folder's own files are never touched.
+Each shared folder gets a hidden `.tailshare/` folder (subfolders don't) holding:
+
+- unfinished uploads
+- trash, kept 30 days and restorable from the admin Trash page
+- `owners.json`, who uploaded what
+- cached thumbnails, remade after 60 days (not cached on read-only shares)
+
+When a share is removed or moved, the old folder's `.tailshare/` is deleted,
+trash included (the app warns first). The shared files themselves are never
+touched.
+
 The state directory holds the Tailscale node identity, `config.json` and
-`activity.log` (one JSON object per line, append only).
+`activity.log` (append-only, one JSON object per line).
 
-## Sharing with a friend
+## Development
 
-1. In the Tailscale admin console, share the `tailshare` machine with them.
-2. Allow shared users onto port 443 only, e.g. in the policy file:
-   `{"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["443"]}`
-3. They open `https://tailshare.<your-tailnet>.ts.net` once. They show up on the
-   admin Status page with their `id:`; add it to `access` and reload.
-
-If someone has access but the policy blocks them, the server logs a warning and
-the Status page marks them "blocked by tailnet policy". It works this out from the
-access rules Tailscale sends the node, so no API key is needed.
-
-`-roots /srv,/mnt/media` limits which folders the admin API may turn into shares
-(default: your home folder). `kill -USR1 <pid>` dumps the peers and access rules the node currently sees.
-
-## Dev mode
-
+```sh
+cd app
+npm install
+npm run rclone      # fetch the bundled rclone (checksums pinned in scripts/fetch-rclone.mjs)
+npm run tauri dev
 ```
+
+Needs Go, Rust and Node. `npm run server` builds the bundled server on its own.
+
+To run the server without Tailscale:
+
+```sh
 ./tailshare-server -state /tmp/ts-dev -dev-listen 127.0.0.1:8765 -dev-user you@local
 ```
 
-Plain HTTP on loopback, no Tailscale, every request is `-dev-user`.
+Plain HTTP on loopback; every request is treated as `-dev-user`.
