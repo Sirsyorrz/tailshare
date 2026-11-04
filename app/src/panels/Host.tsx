@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../state/store";
-import { baseOf, fmtSize } from "../lib/api";
+import { baseOf, fmtSize, get, type AdminStatus } from "../lib/api";
+import { Linkify } from "../lib/Linkify";
+import { PolicyGrant } from "./PolicyGrant";
 
 type FFmpegState = { installed: boolean; system: boolean; downloadBytes: number | null };
 
@@ -63,7 +65,7 @@ function Previews() {
           </button>
         )}
       </div>
-      {error && <div className="bad small">{error}</div>}
+      {error && <div className="bad small"><Linkify text={error} /></div>}
     </>
   );
 }
@@ -84,6 +86,19 @@ export function Host() {
   useEffect(() => {
     if (settings) setName(settings.hostname);
   }, [settings?.hostname]);
+
+  const [grant, setGrant] = useState("");
+  useEffect(() => {
+    setGrant("");
+    if (host.phase !== "running" || !host.url) return;
+    let live = true;
+    get<AdminStatus>(baseOf(host.url), "/api/admin/status")
+      .then((s) => live && setGrant(s.grant ?? ""))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [host.phase, host.url]);
 
   const start = async () => {
     setBusy(true);
@@ -218,7 +233,15 @@ export function Host() {
         {host.phase === "starting" && (
           <div className="dim small">Connecting to Tailscale. The first start can take a minute while it gets an HTTPS certificate.</div>
         )}
-        {host.phase === "failed" && host.error && <div className="bad small">{host.error}</div>}
+        {host.phase === "failed" && host.error && <div className="bad small"><Linkify text={host.error} /></div>}
+        {host.phase === "failed" && host.error?.includes("enable HTTPS") && (
+          <div className="row">
+            <button className="primary" onClick={() => void openUrl("https://console.tailscale.com/admin/dns")}>
+              Open DNS settings
+            </button>
+            <span className="dim small">Enable HTTPS Certificates there, then start hosting again.</span>
+          </div>
+        )}
 
         {running && host.url && (
           <div className="row">
@@ -266,6 +289,20 @@ export function Host() {
               invite. Your friend accepts it with their own Tailscale account.
               <div>
                 <button onClick={() => void openUrl(machinesURL)}>Open admin console</button>
+              </div>
+            </li>
+            <li>
+              <div className="callout warn">
+                <div>
+                  <b>Do this before they connect.</b> By default your tailnet policy only lets your own devices in, so
+                  your friend gets blocked. Add this to the <code>"grants"</code> list in the policy file, in the
+                  Tailscale admin console under Access controls:
+                  {grant ? (
+                    <PolicyGrant grant={grant} />
+                  ) : (
+                    <div className="dim small">Loading the grant for this machine…</div>
+                  )}
+                </div>
               </div>
             </li>
             <li>They open {host.url} once in their browser.</li>

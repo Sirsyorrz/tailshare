@@ -7,6 +7,7 @@ import { People } from "./People";
 import { Activity } from "./Activity";
 import { Trash } from "./Trash";
 import { DriveButtons } from "./Drives";
+import { Linkify } from "../lib/Linkify";
 
 type Tab = "access" | "shares" | "people" | "activity" | "trash";
 
@@ -48,7 +49,7 @@ export function Server({ server }: { server: ServerT }) {
       )}
 
       <div className="tab-body">
-        {server.error && <div className="bad">{server.error}</div>}
+        {server.error && <div className="bad"><Linkify text={server.error} /></div>}
         {tab === "access" && me && (
           me.shares.length === 0 ? (
             <p className="dim">

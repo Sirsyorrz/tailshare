@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { writeText } from "../lib/clipboard";
 import { call, describePerms, get, permsOf, type AdminStatus, type Config } from "../lib/api";
 import { useLive, useLoad } from "../lib/hooks";
 import { useStore } from "../state/store";
+import { PolicyGrant } from "./PolicyGrant";
 
 /// Everyone the server can see: who has access, who accepted a share but
 /// has none yet, and who the tailnet policy is blocking.
@@ -76,9 +76,8 @@ export function People({ base }: { base: string }) {
             Someone with access can't connect because of your tailnet policy (it only lets your own devices in). Add
             this to the <code>"grants"</code> list in the policy file, in the Tailscale admin console under Access
             controls:
-            <pre className="snippet">{grant}</pre>
+            <PolicyGrant grant={grant} />
           </div>
-          <button onClick={() => void writeText(grant).then(() => useStore.getState().say("Copied"))}>Copy</button>
         </div>
       )}
       {rows.length === 0 ? (

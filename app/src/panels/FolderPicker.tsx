@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { get, type Browse } from "../lib/api";
+import { Linkify } from "../lib/Linkify";
 
 /// Browses folders on the server itself (not this computer), limited to
 /// the server's allowed roots.
@@ -47,7 +48,7 @@ export function FolderPicker({
             {at?.parent !== undefined && <button onClick={() => void go(at.parent!)}>Up</button>}
             {at?.path && !at.parent && <button onClick={() => void go("")}>Up</button>}
           </div>
-          {error && <div className="bad small">{error}</div>}
+          {error && <div className="bad small"><Linkify text={error} /></div>}
           <ul className="picker">
             {at?.dirs.map((d) => (
               <li key={d} onDoubleClick={() => void go(join(d))} onClick={() => void go(join(d))}>

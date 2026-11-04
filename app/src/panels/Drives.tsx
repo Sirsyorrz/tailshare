@@ -5,6 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../state/store";
 import { canWrite, fmtSize, mountable, shortName, type DriveSpec, type Mounted, type ShareInfo } from "../lib/api";
+import { Linkify } from "../lib/Linkify";
 
 const isWindows = navigator.userAgent.includes("Windows");
 
@@ -162,7 +163,7 @@ function MountDialog({
                   )}
                 </div>
               </label>
-              {error && <div className="bad small">{error}</div>}
+              {error && <div className="bad small"><Linkify text={error} /></div>}
             </>
           )}
         </div>
@@ -213,7 +214,7 @@ function MissingSupport({ missing }: { missing: "winfsp" | "fuse" }) {
             or download it yourself
           </button>
         </div>
-        {error && <div className="bad small">{error}</div>}
+        {error && <div className="bad small"><Linkify text={error} /></div>}
       </div>
     );
   }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useStore } from "../state/store";
 import { baseOf } from "../lib/api";
+import { Linkify } from "../lib/Linkify";
 
 export function Settings() {
   const isOpen = useStore((s) => s.showSettings);
@@ -50,7 +51,7 @@ export function Settings() {
         </div>
 
         <div className="modal-body">
-          {error && <div className="bad pad">{error}</div>}
+          {error && <div className="bad pad"><Linkify text={error} /></div>}
 
           <div className="sidebar-h">Hosting</div>
           <div className="setrow">

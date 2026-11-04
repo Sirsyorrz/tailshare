@@ -307,6 +307,14 @@ button.link {
 button.link:hover {
   color: var(--fg);
 }
+a.inline-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+a.inline-link:hover {
+  color: var(--fg);
+}
 
 .steps {
   margin: 0;
