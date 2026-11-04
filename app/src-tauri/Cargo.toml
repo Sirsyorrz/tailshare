@@ -1,6 +1,6 @@
 [package]
 name = "tailshare"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 # Room for a CLI bin next to the app, so bundling needs to know which is which.
