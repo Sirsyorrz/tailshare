@@ -1,9 +1,9 @@
-import { $, el, icon, api, fmtSize, status } from "./util.js";
+import { $, el, icon, api, fmtSize, status, sleep } from "./util.js";
 import { state, on } from "./state.js";
 import { closeModal, modalOpen, menuOpen, closeMenu } from "./modal.js";
 import { renderTransfers, clearFinished } from "./upload.js";
 import { setupLightbox, lightboxOpen, closeLightbox, step } from "./lightbox.js";
-import { setupBrowser, load, render, onKey } from "./browser.js";
+import { setupBrowser, load, render, onKey, poll } from "./browser.js";
 import { renderAdminNav, showAdmin } from "./admin.js";
 
 // Mirrors perm.Presets on the server, largest first.
@@ -35,10 +35,40 @@ async function refreshMe() {
   try {
     const me = await api("GET", "/api/me");
     state.me = me;
-    if (state.share) state.share = me.shares.find((s) => s.name === state.share.name) || state.share;
+    const lost = (state.share && !me.shares.some((s) => s.name === state.share.name)) || (state.view !== "files" && !me.admin);
+    if (lost) return route();
+    if (state.share) state.share = me.shares.find((s) => s.name === state.share.name);
     renderShares();
+    renderAdminNav();
+    if (state.view === "files") render();
   } catch {}
 }
+
+// Long-polls the server so shares, permissions and admin views follow
+// changes made from anywhere (the desktop app, another tab, someone else).
+async function watchChanges() {
+  let have = null;
+  for (;;) {
+    try {
+      const next = await api("GET", "/api/changes?" + new URLSearchParams(have || {}));
+      if (have) {
+        if (next.config !== have.config) await refreshMe();
+        if (next.config !== have.config || next.activity !== have.activity) {
+          if (state.view === "files") poll();
+          else if (!modalOpen()) showAdmin(state.view, true);
+        }
+      }
+      have = next;
+    } catch {
+      await sleep(5000);
+    }
+  }
+}
+
+// Who's online isn't a server event, so the status page re-checks it.
+setInterval(() => {
+  if (state.view === "status" && !document.hidden && !modalOpen()) showAdmin("status", true);
+}, 15000);
 on("ts:me", refreshMe);
 on("ts:view", () => {
   renderShares();
@@ -163,6 +193,7 @@ async function init() {
   renderTransfers();
   window.addEventListener("hashchange", route);
   await route();
+  watchChanges();
 }
 
 init();

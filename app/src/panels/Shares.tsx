@@ -15,7 +15,7 @@ import {
   type Perm,
   type ShareConfig,
 } from "../lib/api";
-import { useLoad } from "../lib/hooks";
+import { useLive, useLoad } from "../lib/hooks";
 import { useStore } from "../state/store";
 import { FolderPicker } from "./FolderPicker";
 
@@ -149,11 +149,12 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
     if (data) setDraft(withoutAdmins(toDraft(data.config), people));
   }, [data, people]);
 
+  const dirty = !!data && !!draft && JSON.stringify(draft) !== JSON.stringify(withoutAdmins(toDraft(data.config), people));
+  useLive(base, reload, { paused: dirty || saving || picking !== null });
+
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data || !draft) return <div className="dim">Loading…</div>;
 
-  const original = JSON.stringify(withoutAdmins(toDraft(data.config), people));
-  const dirty = JSON.stringify(draft) !== original;
   const issues = problems(draft);
 
   const edit = (f: (d: Draft) => void) => {

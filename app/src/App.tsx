@@ -7,6 +7,7 @@ import { Host } from "./panels/Host";
 import { Server } from "./panels/Server";
 import { Drives } from "./panels/Drives";
 import { baseOf, pendingUploads, shortName, type HostState } from "./lib/api";
+import { useWatchServers } from "./lib/hooks";
 import "./app.css";
 
 function Status() {
@@ -122,6 +123,7 @@ function Main() {
 
 export default function App() {
   const scanning = useStore((s) => s.scanning);
+  useWatchServers();
 
   useEffect(() => {
     const st = useStore.getState();

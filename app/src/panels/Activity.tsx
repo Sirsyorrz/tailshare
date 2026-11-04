@@ -1,10 +1,11 @@
 import { fmtDate, fmtSize, get, type ActivityEntry } from "../lib/api";
-import { useLoad } from "../lib/hooks";
+import { useLive, useLoad } from "../lib/hooks";
 
 const speed = (e: ActivityEntry) => (e.bytes && e.seconds ? fmtSize(e.bytes / Math.max(e.seconds, 0.001)) + "/s" : "");
 
 export function Activity({ base }: { base: string }) {
   const { data, error, reload, loading } = useLoad(() => get<ActivityEntry[]>(base, "/api/admin/activity?n=500"), [base]);
+  useLive(base, reload);
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data) return <div className="dim">Loading…</div>;
   return (

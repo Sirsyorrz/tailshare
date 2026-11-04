@@ -1,6 +1,6 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import { call, fmtDate, fmtSize, get, type AdminStatus, type TrashItem } from "../lib/api";
-import { useLoad } from "../lib/hooks";
+import { useLive, useLoad } from "../lib/hooks";
 import { useStore } from "../state/store";
 
 export function Trash({ base }: { base: string }) {
@@ -15,6 +15,7 @@ export function Trash({ base }: { base: string }) {
         })),
     );
   }, [base]);
+  useLive(base, reload);
 
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data) return <div className="dim">Loading…</div>;

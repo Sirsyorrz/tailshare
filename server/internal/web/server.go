@@ -56,6 +56,8 @@ type Server struct {
 	cfg    *config.Config
 	shares map[string]*store.Share
 
+	changes *changes
+
 	seen sync.Map
 	// lastSeen maps a source address to when it last made a request. It
 	// settles "can they connect" when the policy check can't tell.
@@ -86,7 +88,7 @@ func (s *Server) observedReach(p *reach.Peer) (seen time.Time) {
 }
 
 func New(opt Options) *Server {
-	s := &Server{opt: opt, shares: map[string]*store.Share{}, cfg: &config.Config{}}
+	s := &Server{opt: opt, shares: map[string]*store.Share{}, cfg: &config.Config{}, changes: newChanges()}
 	s.SetHosts(opt.Hosts...)
 	return s
 }
@@ -138,6 +140,7 @@ func (s *Server) Load(cfg *config.Config) {
 			}
 		}
 	}
+	s.changes.bump(true)
 	log.Printf("loaded %d share(s)", len(next))
 }
 
@@ -283,6 +286,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"app": "tailshare", "version": s.opt.Version})
 	})
+	mux.HandleFunc("GET /api/changes", s.changesHandler)
 	s.fileRoutes(mux)
 	s.adminRoutes(mux)
 	s.adminConfigRoutes(mux)
@@ -305,6 +309,7 @@ func (s *Server) record(r *http.Request, e activity.Entry) {
 	u := userOf(r)
 	e.UserID, e.Login, e.Node, e.External = u.ID, u.Login, u.Node, u.External
 	s.opt.Activity.Add(e)
+	s.changes.bump(false)
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {

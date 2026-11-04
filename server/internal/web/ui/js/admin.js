@@ -39,18 +39,22 @@ export function renderAdminNav() {
   );
 }
 
-export async function showAdmin(view) {
+// quiet re-renders in place, for updates the user didn't ask for.
+export async function showAdmin(view, quiet = false) {
   state.view = view;
   const box = $("admin-view");
   box.hidden = false;
-  box.replaceChildren(el("div", { class: "dim", text: "Loading\u2026" }));
-  emit("ts:view");
+  if (!quiet) {
+    box.replaceChildren(el("div", { class: "dim", text: "Loading\u2026" }));
+    emit("ts:view");
+  }
   try {
     if (view === "status") await renderStatus(box);
     if (view === "activity") await renderActivity(box);
     if (view === "trash") await renderTrash(box);
-    status("");
+    if (!quiet) status("");
   } catch (e) {
+    if (quiet) return;
     box.replaceChildren(el("div", { class: "bad", text: "Couldn't load: " + e.message }));
   }
 }

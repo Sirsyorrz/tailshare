@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { writeText } from "../lib/clipboard";
 import { call, describePerms, get, permsOf, type AdminStatus, type Config } from "../lib/api";
-import { useLoad } from "../lib/hooks";
+import { useLive, useLoad } from "../lib/hooks";
 import { useStore } from "../state/store";
 
 /// Everyone the server can see: who has access, who accepted a share but
@@ -24,6 +24,7 @@ export function People({ base }: { base: string }) {
   }, [base]);
   const [granting, setGranting] = useState<string | null>(null);
   const [grantError, setGrantError] = useState("");
+  useLive(base, reload, { paused: granting !== null, everyMs: 15_000 });
 
   if (error) return <div className="bad">Couldn't load: {error}</div>;
   if (!data) return <div className="dim">Loading…</div>;

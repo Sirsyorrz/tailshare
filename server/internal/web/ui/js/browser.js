@@ -133,15 +133,15 @@ async function listFolder(share, path, onlyIfChanged = false) {
   return { entries: data };
 }
 
-// Changes made elsewhere (drives, other people, files added on the server's
-// disk) can't be pushed to the page, so the open folder is re-checked while
-// the tab is visible. Skipped while the user is mid-action, since a
+// Files added straight to the server's disk aren't announced by
+// /api/changes, so the open folder is also re-checked while the tab is
+// visible. Skipped while the user is mid-action, since a
 // re-render would close what they're doing.
 const POLL_MS = 3000;
 let dragging = false;
 let polling = false;
 
-async function poll() {
+export async function poll() {
   if (polling || document.hidden || state.view !== "files" || !state.share || !has("view")) return;
   if (state.hits || state.loading || dragging || modalOpen() || menuOpen() || !$("dropzone").hidden) return;
   const share = state.share.name;

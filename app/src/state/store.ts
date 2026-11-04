@@ -21,6 +21,8 @@ interface State {
   tailnetError: string;
   scanning: boolean;
   servers: Server[];
+  /// Bumped whenever a server reports a change; open views reload on it.
+  revs: Record<string, number>;
   selected: Selection;
   host: HostState;
   hostLog: string[];
@@ -40,6 +42,8 @@ interface State {
   loadSettings: () => Promise<void>;
   saveSettings: (s: Settings) => Promise<void>;
   loadDrives: () => Promise<void>;
+  refreshMe: (base: string) => Promise<void>;
+  serverChanged: (base: string) => void;
 }
 
 export const useStore = create<State>((set, getState) => ({
@@ -51,6 +55,7 @@ export const useStore = create<State>((set, getState) => ({
   tailnetError: "",
   scanning: false,
   servers: [],
+  revs: {},
   selected: { kind: "host" },
   host: { phase: "stopped", hostname: "", stateDir: "" },
   hostLog: [],
@@ -90,6 +95,17 @@ export const useStore = create<State>((set, getState) => ({
     setTimeout(() => void getState().scan(), 3000);
     setTimeout(() => void getState().scan(), 15000);
   },
+
+  refreshMe: async (base) => {
+    let patch: Partial<Server>;
+    try {
+      patch = { me: await get<Me>(base, "/api/me"), error: undefined };
+    } catch (e) {
+      patch = { error: String((e as Error).message ?? e) };
+    }
+    set((s) => ({ servers: s.servers.map((x) => (x.base === base ? { ...x, ...patch } : x)) }));
+  },
+  serverChanged: (base) => set((s) => ({ revs: { ...s.revs, [base]: (s.revs[base] ?? 0) + 1 } })),
 
   loadDrives: async () => {
     try {
