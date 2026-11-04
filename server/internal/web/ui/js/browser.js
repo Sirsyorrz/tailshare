@@ -15,7 +15,7 @@ import {
   previewKind,
 } from "./util.js";
 import { state, has, savePrefs, emit, on } from "./state.js";
-import { modal, contextMenu, pickFolder } from "./modal.js";
+import { modal, contextMenu, pickFolder, modalOpen, menuOpen } from "./modal.js";
 import { enqueue, fromDataTransfer, fromFolderInput } from "./upload.js";
 import { openLightbox } from "./lightbox.js";
 
@@ -97,7 +97,7 @@ export async function load(path, keepSelection = false) {
   renderChrome();
   if (has("view")) {
     try {
-      state.entries = await api("GET", shareURL(state.share.name, "list?path=" + encodeURIComponent(path)));
+      state.entries = (await listFolder(state.share.name, path)).entries;
       if ($("status-msg").className === "bad") status("");
     } catch (e) {
       state.entries = [];
@@ -113,6 +113,61 @@ export async function load(path, keepSelection = false) {
 }
 
 export const refresh = () => state.share && load(state.path, true);
+
+// The last listing's ETag, so an unchanged folder costs the server a 304.
+let listed = { key: "", etag: "" };
+
+// Resolves to null when the folder hasn't changed since the last listing.
+async function listFolder(share, path, onlyIfChanged = false) {
+  const key = share + "\0" + path;
+  const headers = onlyIfChanged && listed.key === key ? { "If-None-Match": listed.etag } : {};
+  const r = await fetch(shareURL(share, "list?path=" + encodeURIComponent(path)), { headers });
+  if (r.status === 304) return null;
+  const data = await r.json().catch(() => null);
+  if (!r.ok) {
+    const e = new Error((data && data.error) || r.statusText);
+    e.status = r.status;
+    throw e;
+  }
+  listed = { key, etag: r.headers.get("ETag") || "" };
+  return { entries: data };
+}
+
+// Changes made elsewhere (drives, other people, files added on the server's
+// disk) can't be pushed to the page, so the open folder is re-checked while
+// the tab is visible. Skipped while the user is mid-action, since a
+// re-render would close what they're doing.
+const POLL_MS = 3000;
+let dragging = false;
+let polling = false;
+
+async function poll() {
+  if (polling || document.hidden || state.view !== "files" || !state.share || !has("view")) return;
+  if (state.hits || state.loading || dragging || modalOpen() || menuOpen() || !$("dropzone").hidden) return;
+  const share = state.share.name;
+  const path = state.path;
+  polling = true;
+  try {
+    const r = await listFolder(share, path, true);
+    if (!r || !state.share || state.share.name !== share || state.path !== path || state.loading || state.hits) return;
+    state.entries = r.entries;
+    base = itemsFromEntries();
+    for (const p of [...state.selected]) if (!base.some((e) => e.path === p)) state.selected.delete(p);
+    if (state.focus && !base.some((e) => e.path === state.focus)) state.focus = null;
+    render();
+  } catch {
+    // Offline for a moment; the next tick tries again.
+  } finally {
+    polling = false;
+  }
+}
+
+// On document, not the dragged row: a drop can re-render the row away.
+document.addEventListener("dragend", () => (dragging = false), true);
+document.addEventListener("drop", () => (dragging = false), true);
+setInterval(poll, POLL_MS);
+document.addEventListener("visibilitychange", poll);
+window.addEventListener("focus", poll);
 
 on("ts:changed", (d) => {
   if (state.share && d.share === state.share.name && d.dir === state.path && !state.hits) refresh();
@@ -471,7 +526,9 @@ function wireItem(node, e) {
       if (!state.selected.has(e.path)) selectOnly(e);
       ev.dataTransfer.setData("application/x-tailshare", JSON.stringify([...state.selected]));
       ev.dataTransfer.effectAllowed = "move";
+      dragging = true;
     });
+
   }
   if (e.dir) dropTarget(node, e.path);
 }

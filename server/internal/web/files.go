@@ -2,6 +2,9 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -158,7 +161,22 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, c shareCtx) {
 	for i, e := range ents {
 		out[i] = listEntry{Entry: e, Mine: e.Owner != 0 && e.Owner == me}
 	}
-	writeJSON(w, out)
+	// The web UI polls the open folder; an unchanged one costs a 304.
+	b, err := json.Marshal(out)
+	if err != nil {
+		httpError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	sum := sha256.Sum256(b)
+	etag := `"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(append(b, '\n'))
 }
 
 func attachment(w http.ResponseWriter, contentType, filename string) {
