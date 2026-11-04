@@ -90,18 +90,26 @@ func HasFFmpeg() bool { return ffmpegPath() != "" }
 // sem keeps a folder full of 40 MP photos from pinning every core.
 var sem = make(chan struct{}, 3)
 
+// videoSem runs one ffmpeg at a time: footage often lives on a spinning
+// disk, where parallel seeks across big files thrash it to 100%.
+var videoSem = make(chan struct{}, 1)
+
 // Make returns a JPEG no larger than size on its longest side. f must be
 // the opened file; realPath is only used for ffmpeg on systems without
 // /dev/fd.
 func Make(ctx context.Context, f *os.File, name, realPath string, size int) ([]byte, error) {
+	ext := strings.ToLower(filepath.Ext(name))
+	slots := sem
+	if viaFFmpeg[ext] {
+		slots = videoSem
+	}
 	select {
-	case sem <- struct{}{}:
+	case slots <- struct{}{}:
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	defer func() { <-sem }()
+	defer func() { <-slots }()
 
-	ext := strings.ToLower(filepath.Ext(name))
 	var img image.Image
 	var err error
 	rot := 1
@@ -172,25 +180,28 @@ func encode(img image.Image) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+var errTimeout = errors.New("ffmpeg took too long")
+
 // ffmpegFrame grabs a representative frame a few seconds in (the first
-// frame is often black), falling back to the start for short clips.
+// frame is often black), falling back to the start for short clips. The
+// first try decodes only the keyframe nearest the seek point, so ffmpeg
+// reads a few MB instead of a whole GOP of 4K footage.
 func ffmpegFrame(ctx context.Context, f *os.File, realPath string, size int) (image.Image, error) {
-	for _, at := range []string{"3", "0"} {
-		img, err := runFFmpeg(ctx, f, realPath, size, at)
-		if err == nil {
-			return img, nil
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if at == "0" {
-			return nil, err
-		}
+	img, err := runFFmpeg(ctx, f, realPath, size, "3", true)
+	if err == nil {
+		return img, nil
 	}
-	return nil, ErrUnsupported
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// A file that timed out once will time out again; don't read it twice.
+	if errors.Is(err, errTimeout) {
+		return nil, err
+	}
+	return runFFmpeg(ctx, f, realPath, size, "0", false)
 }
 
-func runFFmpeg(ctx context.Context, f *os.File, realPath string, size int, at string) (image.Image, error) {
+func runFFmpeg(ctx context.Context, f *os.File, realPath string, size int, at string, keyframeOnly bool) (image.Image, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -198,15 +209,22 @@ func runFFmpeg(ctx context.Context, f *os.File, realPath string, size int, at st
 	}
 	input, extra := ffmpegInput(f, realPath)
 	scale := "scale='min(" + itoa(size) + ",iw)':'min(" + itoa(size) + ",ih)':force_original_aspect_ratio=decrease"
-	cmd := exec.CommandContext(ctx, ffmpegPath(),
-		"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-ss", at, "-i", input,
-		"-frames:v", "1", "-vf", scale,
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin"}
+	if keyframeOnly {
+		args = append(args, "-skip_frame", "nokey", "-noaccurate_seek")
+	}
+	args = append(args, "-ss", at, "-i", input,
+		"-map", "0:v:0", "-frames:v", "1", "-vf", scale,
 		"-f", "image2pipe", "-vcodec", "mjpeg", "-q:v", "4", "pipe:1")
+	cmd := exec.CommandContext(ctx, ffmpegPath(), args...)
 	cmd.ExtraFiles = extra
+	hideWindow(cmd)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, errTimeout
+		}
 		return nil, err
 	}
 	if out.Len() == 0 {
