@@ -141,6 +141,7 @@ func main() {
 		fatal(err)
 	}
 	srv.Configure(*cfgPath, splitRoots(*rootsFlag), *rootsFile)
+	srv.CacheThumbsIn(filepath.Join(*stateDir, "thumbs"))
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
 	go srv.WatchReach(ctx)

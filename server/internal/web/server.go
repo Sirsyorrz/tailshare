@@ -2,7 +2,9 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -43,6 +45,9 @@ type Options struct {
 	// RootsFile lists more roots, one per line, re-read on use.
 	RootsFile string
 	Version   string
+	// ThumbCache is where read-only shares cache previews. Empty means
+	// they don't.
+	ThumbCache string
 }
 
 type Server struct {
@@ -116,6 +121,12 @@ func (s *Server) Load(cfg *config.Config) {
 		if err != nil {
 			log.Printf("share %q (%s) disabled: %v", sc.Name, sc.Path, err)
 			continue
+		}
+		if sc.ReadOnly && s.opt.ThumbCache != "" {
+			sum := sha256.Sum256([]byte(sameDir(sc.Path)))
+			if err := sh.CacheThumbsIn(filepath.Join(s.opt.ThumbCache, hex.EncodeToString(sum[:8]))); err != nil {
+				log.Printf("share %q: no preview cache: %v", sc.Name, err)
+			}
 		}
 		next[sc.Name] = sh
 	}

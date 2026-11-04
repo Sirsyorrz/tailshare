@@ -35,8 +35,9 @@ func (s *Share) Thumbnail(ctx context.Context, p string, size int) ([]byte, time
 	rel, _ := cleanRel(p)
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d|%s|%d|%d|%d", thumb.Version, rel, st.Size(), st.ModTime().UnixNano(), size))
 	key := hex.EncodeToString(sum[:12])
-	cached := thumbsDir + "/" + key[:2] + "/" + key + ".jpg"
-	if b, err := s.readMeta(cached); err == nil {
+	thumbs, dir := s.thumbStore()
+	cached := dir + "/" + key[:2] + "/" + key + ".jpg"
+	if b, err := readFile(thumbs, cached); err == nil {
 		if len(b) == 0 {
 			return nil, time.Time{}, ErrNoPreview
 		}
@@ -50,11 +51,11 @@ func (s *Share) Thumbnail(ctx context.Context, p string, size int) ([]byte, time
 	b, err := thumb.Make(ctx, f, st.Name(), real, size)
 	if err != nil {
 		if ctx.Err() == nil {
-			s.writeMeta(cached, nil)
+			writeFile(thumbs, cached, nil)
 		}
 		return nil, time.Time{}, ErrNoPreview
 	}
-	s.writeMeta(cached, b)
+	writeFile(thumbs, cached, b)
 	return b, st.ModTime(), nil
 }
 
@@ -76,8 +77,40 @@ func (s *Share) realPath(rel string) (string, error) {
 	return p, nil
 }
 
-func (s *Share) readMeta(p string) ([]byte, error) {
-	f, err := s.root.Open(p)
+// CacheThumbsIn keeps a read-only share's previews in dir, outside the
+// shared folder. Without it they'd be remade on every visit, running
+// ffmpeg over the same footage again and again.
+func (s *Share) CacheThumbsIn(dir string) error {
+	if s.writable {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	s.thumbCache = r
+	return nil
+}
+
+// thumbStore is where previews are cached, or nil for nowhere.
+func (s *Share) thumbStore() (*os.Root, string) {
+	if s.writable {
+		return s.root, thumbsDir
+	}
+	if s.thumbCache != nil {
+		return s.thumbCache, "thumbs"
+	}
+	return nil, ""
+}
+
+func readFile(r *os.Root, p string) ([]byte, error) {
+	if r == nil {
+		return nil, fs.ErrNotExist
+	}
+	f, err := r.Open(p)
 	if err != nil {
 		return nil, err
 	}
@@ -94,27 +127,26 @@ func (s *Share) readMeta(p string) ([]byte, error) {
 	return b, nil
 }
 
-// writeMeta is best effort: read-only shares have no meta dir and just
-// don't cache.
-func (s *Share) writeMeta(p string, b []byte) {
-	if !s.writable {
+// writeFile is best effort; a nil root caches nothing.
+func writeFile(r *os.Root, p string, b []byte) {
+	if r == nil {
 		return
 	}
-	if err := s.root.MkdirAll(path.Dir(p), 0o700); err != nil {
+	if err := r.MkdirAll(path.Dir(p), 0o700); err != nil {
 		return
 	}
 	tmp := p + "." + randID(4) + ".tmp"
-	f, err := s.root.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	f, err := r.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return
 	}
 	_, werr := f.Write(b)
 	if cerr := f.Close(); werr != nil || cerr != nil {
-		s.root.Remove(tmp)
+		r.Remove(tmp)
 		return
 	}
-	if err := s.root.Rename(tmp, p); err != nil {
-		s.root.Remove(tmp)
+	if err := r.Rename(tmp, p); err != nil {
+		r.Remove(tmp)
 	}
 }
 
@@ -122,13 +154,17 @@ func (s *Share) writeMeta(p string, b []byte) {
 // files that were since changed or deleted are never read again, so age
 // is enough.
 func (s *Share) PurgeThumbs(maxAge time.Duration) {
+	r, dir := s.thumbStore()
+	if r == nil {
+		return
+	}
 	cutoff := time.Now().Add(-maxAge)
-	fs.WalkDir(s.root.FS(), thumbsDir, func(p string, d fs.DirEntry, err error) error {
+	fs.WalkDir(r.FS(), dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
 		if info, err := d.Info(); err == nil && info.ModTime().Before(cutoff) {
-			s.root.Remove(p)
+			r.Remove(p)
 		}
 		return nil
 	})

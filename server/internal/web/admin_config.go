@@ -28,6 +28,10 @@ func (s *Server) Configure(configPath string, roots []string, rootsFile string) 
 	s.opt.RootsFile = rootsFile
 }
 
+// CacheThumbsIn sets where read-only shares cache previews. Call before
+// Load.
+func (s *Server) CacheThumbsIn(dir string) { s.opt.ThumbCache = dir }
+
 // Reload re-reads the config file, e.g. after SIGHUP.
 func (s *Server) Reload() error {
 	s.cfgWrite.Lock()

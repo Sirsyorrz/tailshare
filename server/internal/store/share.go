@@ -31,6 +31,8 @@ type Share struct {
 	dir      string
 	root     *os.Root
 	writable bool
+	// thumbCache holds previews for a read-only share; nil otherwise.
+	thumbCache *os.Root
 
 	mu      sync.Mutex
 	uploads map[string]*upload
@@ -66,7 +68,12 @@ func Open(name, dir string, writable bool) (*Share, error) {
 	return s, nil
 }
 
-func (s *Share) Close() error { return s.root.Close() }
+func (s *Share) Close() error {
+	if s.thumbCache != nil {
+		s.thumbCache.Close()
+	}
+	return s.root.Close()
+}
 
 func (s *Share) Dir() string { return s.dir }
 
