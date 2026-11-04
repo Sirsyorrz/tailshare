@@ -49,12 +49,43 @@ func Supported(name string) bool {
 	return goImage[ext] || (viaFFmpeg[ext] && ffmpegPath() != "")
 }
 
-var ffmpegOnce = sync.OnceValue(func() string {
-	p, _ := exec.LookPath("ffmpeg")
-	return p
-})
+var ffmpeg struct {
+	sync.Mutex
+	preferred string
+	found     string
+	checked   time.Time
+}
 
-func ffmpegPath() string { return ffmpegOnce() }
+// SetFFmpeg makes path win over the one on PATH. It may not exist yet: the
+// desktop app passes where it would install ffmpeg, and the lookup below
+// is repeated so an install takes effect without a restart.
+func SetFFmpeg(path string) {
+	ffmpeg.Lock()
+	defer ffmpeg.Unlock()
+	ffmpeg.preferred = path
+	ffmpeg.checked = time.Time{}
+}
+
+func ffmpegPath() string {
+	ffmpeg.Lock()
+	defer ffmpeg.Unlock()
+	if time.Since(ffmpeg.checked) < 30*time.Second {
+		return ffmpeg.found
+	}
+	ffmpeg.checked = time.Now()
+	ffmpeg.found = ""
+	if ffmpeg.preferred != "" {
+		if st, err := os.Stat(ffmpeg.preferred); err == nil && !st.IsDir() {
+			ffmpeg.found = ffmpeg.preferred
+			return ffmpeg.found
+		}
+	}
+	ffmpeg.found, _ = exec.LookPath("ffmpeg")
+	return ffmpeg.found
+}
+
+// HasFFmpeg reports whether video and HEIC/AVIF previews are possible.
+func HasFFmpeg() bool { return ffmpegPath() != "" }
 
 // sem keeps a folder full of 40 MP photos from pinning every core.
 var sem = make(chan struct{}, 3)

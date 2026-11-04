@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use tailshare::{api, background, drives, host, settings, tailnet};
+use tailshare::{api, background, drives, ffmpeg, host, settings, tailnet};
 use tauri::{AppHandle, Manager, RunEvent, State};
 
 type Res<T> = Result<T, String>;
@@ -203,6 +203,21 @@ async fn install_winfsp() -> Res<()> {
     drives::install_winfsp().await.map_err(err)
 }
 
+#[tauri::command]
+fn ffmpeg_state() -> ffmpeg::State {
+    ffmpeg::state()
+}
+
+#[tauri::command]
+async fn install_ffmpeg(app: AppHandle) -> Res<()> {
+    ffmpeg::install(&app).await.map_err(err)
+}
+
+#[tauri::command]
+fn remove_ffmpeg() -> Res<()> {
+    ffmpeg::remove().map_err(err)
+}
+
 fn main() {
     // WebKitGTK's DMA-BUF renderer hard-crashes with a Wayland protocol error on
     // NVIDIA. Must be set before GTK initialises.
@@ -266,6 +281,9 @@ fn main() {
             drive_mount,
             drive_unmount,
             install_winfsp,
+            ffmpeg_state,
+            install_ffmpeg,
+            remove_ffmpeg,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

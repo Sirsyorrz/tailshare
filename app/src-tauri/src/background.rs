@@ -59,6 +59,8 @@ fn server_args(a: &Args) -> Vec<String> {
         status_file().to_string_lossy().into_owned(),
         "-log-file".into(),
         log_file().to_string_lossy().into_owned(),
+        "-ffmpeg".into(),
+        crate::ffmpeg::bin().to_string_lossy().into_owned(),
     ];
     if !a.admin.is_empty() {
         v.push("-bootstrap-admin".into());

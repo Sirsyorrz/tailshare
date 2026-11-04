@@ -179,6 +179,8 @@ impl Host {
             .args(["-roots", ""])
             .arg("-roots-file")
             .arg(dir.join("roots.txt"))
+            .arg("-ffmpeg")
+            .arg(crate::ffmpeg::bin())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

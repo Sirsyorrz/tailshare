@@ -1,8 +1,72 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useStore } from "../state/store";
-import { baseOf } from "../lib/api";
+import { baseOf, fmtSize } from "../lib/api";
+
+type FFmpegState = { installed: boolean; system: boolean; downloadBytes: number | null };
+
+function Previews() {
+  const [st, setSt] = useState<FFmpegState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState("");
+
+  const load = () => void invoke<FFmpegState>("ffmpeg_state").then(setSt);
+  useEffect(() => {
+    load();
+    const un = listen<{ done: number; total: number }>("ffmpeg-progress", (e) => setProgress(e.payload));
+    return () => void un.then((f) => f());
+  }, []);
+
+  const run = async (cmd: "install_ffmpeg" | "remove_ffmpeg") => {
+    setBusy(true);
+    setError("");
+    setProgress(null);
+    try {
+      await invoke(cmd);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+      load();
+    }
+  };
+
+  if (!st) return null;
+  let text: string;
+  if (st.installed) text = "On, using ffmpeg downloaded by tailshare.";
+  else if (st.system) text = "On, using the ffmpeg installed on this computer.";
+  else if (st.downloadBytes)
+    text = `Off. Friends see an icon instead of a preview for videos and HEIC/AVIF photos. Turning it on downloads ffmpeg (${fmtSize(st.downloadBytes)}).`;
+  else text = "Off. Install ffmpeg on this computer to get previews of videos and HEIC/AVIF photos.";
+
+  return (
+    <>
+      <h3>Video thumbnails</h3>
+      <div className="row">
+        <span className="grow dim small">{text}</span>
+        {!st.installed && !st.system && st.downloadBytes && (
+          <button disabled={busy} onClick={() => void run("install_ffmpeg")}>
+            {busy
+              ? progress && progress.done < progress.total
+                ? `Downloading ${Math.floor((progress.done / progress.total) * 100)}%`
+                : "Installing\u2026"
+              : "Turn on"}
+          </button>
+        )}
+        {st.installed && (
+          <button disabled={busy} onClick={() => void run("remove_ffmpeg")}>
+            Remove
+          </button>
+        )}
+      </div>
+      {error && <div className="bad small">{error}</div>}
+    </>
+  );
+}
 
 export function Host() {
   const host = useStore((s) => s.host);
@@ -211,6 +275,8 @@ export function Host() {
           </ol>
         </>
       )}
+
+      <Previews />
 
       <h3>
         <button className="link" onClick={() => setShowLog(!showLog)}>

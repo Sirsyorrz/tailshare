@@ -27,6 +27,7 @@ import (
 	"github.com/Sirsyorrz/tailshare/server/internal/config"
 	"github.com/Sirsyorrz/tailshare/server/internal/identity"
 	"github.com/Sirsyorrz/tailshare/server/internal/reach"
+	"github.com/Sirsyorrz/tailshare/server/internal/thumb"
 	"github.com/Sirsyorrz/tailshare/server/internal/web"
 )
 
@@ -57,6 +58,7 @@ func main() {
 	statusFile := flag.String("status-file", "", "keep this JSON file updated with the server's state (for the desktop app)")
 	logFile := flag.String("log-file", "", "also write the log to this file")
 	exitOnEOF := flag.Bool("exit-on-eof", false, "exit when stdin closes, so a parent app's crash can't leave the server running")
+	ffmpegPath := flag.String("ffmpeg", "", "ffmpeg to use for video and HEIC/AVIF thumbnails, before the one on PATH; may not exist yet")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -64,6 +66,7 @@ func main() {
 		return
 	}
 
+	thumb.SetFFmpeg(*ffmpegPath)
 	if *cfgPath == "" {
 		*cfgPath = filepath.Join(*stateDir, "config.json")
 	}
