@@ -87,16 +87,26 @@ export function Host() {
     if (settings) setName(settings.hostname);
   }, [settings?.hostname]);
 
-  const [grant, setGrant] = useState("");
+  // null while loading, "" if the server can't work it out.
+  const [grant, setGrant] = useState<string | null>(null);
   useEffect(() => {
-    setGrant("");
+    setGrant(null);
     if (host.phase !== "running" || !host.url) return;
+    const base = baseOf(host.url);
     let live = true;
-    get<AdminStatus>(baseOf(host.url), "/api/admin/status")
-      .then((s) => live && setGrant(s.grant ?? ""))
-      .catch(() => {});
+    let timer: ReturnType<typeof setTimeout>;
+    // Right after a first start the server can still be getting its HTTPS
+    // certificate, so early requests fail; keep trying until it answers.
+    const load = () =>
+      get<AdminStatus>(base, "/api/admin/status")
+        .then((s) => live && setGrant(s.grant ?? ""))
+        .catch(() => {
+          if (live) timer = setTimeout(load, 3000);
+        });
+    load();
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [host.phase, host.url]);
 
@@ -292,15 +302,20 @@ export function Host() {
               </div>
             </li>
             <li>
-              <div className="callout warn">
+              Only if you've edited your tailnet policy: the default one lets anyone you share with in, but a stricter
+              one can block them. In that case add this to the <code>"grants"</code> list in the policy file, in the
+              Tailscale admin console under Access controls:
+              <div className="callout">
                 <div>
-                  <b>Do this before they connect.</b> By default your tailnet policy only lets your own devices in, so
-                  your friend gets blocked. Add this to the <code>"grants"</code> list in the policy file, in the
-                  Tailscale admin console under Access controls:
                   {grant ? (
                     <PolicyGrant grant={grant} />
+                  ) : grant === null ? (
+                    <span className="dim small">Waiting for the server to work out this machine's grant…</span>
                   ) : (
-                    <div className="dim small">Loading the grant for this machine…</div>
+                    <span className="dim small">
+                      This server can't read the tailnet policy, so it can't suggest a grant. People under Manage
+                      shares shows who is blocked.
+                    </span>
                   )}
                 </div>
               </div>

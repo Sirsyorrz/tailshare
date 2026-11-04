@@ -73,7 +73,7 @@ export function People({ base }: { base: string }) {
       {blocked && (
         <div className="callout warn">
           <div>
-            Someone with access can't connect because of your tailnet policy (it only lets your own devices in). Add
+            Someone with access can't connect because your tailnet policy doesn't let shared users in. Add
             this to the <code>"grants"</code> list in the policy file, in the Tailscale admin console under Access
             controls:
             <PolicyGrant grant={grant} />

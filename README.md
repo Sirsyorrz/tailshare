@@ -75,7 +75,8 @@ plus delete.
 ## Sharing with a friend
 
 1. In the Tailscale admin console, share the `tailshare` machine with them.
-2. Let shared users reach port 443 only. Add a grant to the tailnet policy file:
+2. The default tailnet policy already lets shared users in. If you've made it
+   stricter, add a grant that lets them reach port 443 on tailshare:
    ```json
    {"src": ["autogroup:shared"], "dst": ["<tailshare 100.x IP>"], "ip": ["tcp:443"]}
    ```
