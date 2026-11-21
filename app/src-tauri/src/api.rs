@@ -125,8 +125,10 @@ struct Hello {
 }
 
 async fn hello(base: &str) -> Result<String, String> {
-    let url = check_base(base).and_then(|u| Ok(u.join("/api/hello")?)).map_err(|e| e.to_string())?;
-    let resp = client().get(url).timeout(Duration::from_secs(5)).send().await.map_err(|e| describe(&e))?;
+    let url =
+        check_base(base).and_then(|u| Ok(u.join("/api/hello")?)).map_err(|e| e.to_string())?;
+    let resp =
+        client().get(url).timeout(Duration::from_secs(5)).send().await.map_err(|e| describe(&e))?;
     let status = resp.status();
     let h: Hello = resp
         .json()
@@ -152,7 +154,9 @@ pub async fn discover(bases: Vec<String>, report: Vec<String>) -> Vec<Found> {
         .into_iter()
         .filter_map(|(base, r)| match r {
             Ok(version) => Some(Found { base, version, error: None }),
-            Err(e) if report.contains(&base) => Some(Found { base, version: String::new(), error: Some(e) }),
+            Err(e) if report.contains(&base) => {
+                Some(Found { base, version: String::new(), error: Some(e) })
+            }
             Err(_) => None,
         })
         .collect()
