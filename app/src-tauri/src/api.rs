@@ -115,6 +115,7 @@ fn describe(e: &reqwest::Error) -> String {
 pub struct Found {
     pub base: String,
     pub version: String,
+    pub error: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -123,18 +124,38 @@ struct Hello {
     version: String,
 }
 
-async fn hello(base: String) -> Option<Found> {
-    let url = Url::parse(&base).ok()?.join("/api/hello").ok()?;
-    let resp = client().get(url).timeout(Duration::from_secs(5)).send().await.ok()?;
-    let h: Hello = resp.json().await.ok()?;
-    (h.app == "tailshare").then_some(Found { base, version: h.version })
+async fn hello(base: &str) -> Result<String, String> {
+    let url = check_base(base).and_then(|u| Ok(u.join("/api/hello")?)).map_err(|e| e.to_string())?;
+    let resp = client().get(url).timeout(Duration::from_secs(5)).send().await.map_err(|e| describe(&e))?;
+    let status = resp.status();
+    let h: Hello = resp
+        .json()
+        .await
+        .map_err(|_| format!("not a tailshare server (HTTP {})", status.as_u16()))?;
+    if h.app != "tailshare" {
+        return Err("not a tailshare server".into());
+    }
+    Ok(h.version)
 }
 
 /// Asks every candidate whether it is a tailshare server, all at once.
-/// Other web servers on the tailnet just fail the check.
-pub async fn discover(bases: Vec<String>) -> Vec<Found> {
-    let checks = bases.into_iter().filter(|b| check_base(b).is_ok()).map(hello);
-    futures::future::join_all(checks).await.into_iter().flatten().collect()
+/// Other web servers on the tailnet just fail the check and are dropped,
+/// except those in `report` (added by hand or hosted here): those come back
+/// with the reason, since the user expects them to be there.
+pub async fn discover(bases: Vec<String>, report: Vec<String>) -> Vec<Found> {
+    let checks = bases.into_iter().map(|base| async move {
+        let r = hello(&base).await;
+        (base, r)
+    });
+    futures::future::join_all(checks)
+        .await
+        .into_iter()
+        .filter_map(|(base, r)| match r {
+            Ok(version) => Some(Found { base, version, error: None }),
+            Err(e) if report.contains(&base) => Some(Found { base, version: String::new(), error: Some(e) }),
+            Err(_) => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,7 +184,7 @@ mod live {
     fn talks_to_a_live_server() {
         let base = std::env::var("TAILSHARE_TEST_BASE").expect("TAILSHARE_TEST_BASE");
         let rt = tauri::async_runtime::block_on(async {
-            let found = discover(vec![base.clone(), "https://example.com/".into()]).await;
+            let found = discover(vec![base.clone(), "https://example.com/".into()], vec![]).await;
             let me = request(Request {
                 base: base.clone(),
                 method: "GET".into(),

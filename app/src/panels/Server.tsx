@@ -34,7 +34,8 @@ export function Server({ server }: { server: ServerT }) {
         <button onClick={() => void openUrl(server.base)}>Open in browser</button>
       </div>
       <div className="dim small">
-        <code>{server.base}</code> · version {server.version}
+        <code>{server.base}</code>
+        {server.version && ` · version ${server.version}`}
         {admin && " · you're an admin"}
       </div>
 

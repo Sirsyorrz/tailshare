@@ -15,8 +15,8 @@ async fn tailnet_status() -> Res<tailnet::Tailnet> {
 }
 
 #[tauri::command]
-async fn discover(bases: Vec<String>) -> Vec<api::Found> {
-    api::discover(bases).await
+async fn discover(bases: Vec<String>, report: Vec<String>) -> Vec<api::Found> {
+    api::discover(bases, report).await
 }
 
 #[tauri::command]

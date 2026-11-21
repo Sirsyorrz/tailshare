@@ -139,15 +139,20 @@ export const useStore = create<State>((set, getState) => ({
       const { settings, host } = getState();
       const bases = new Set<string>();
       for (const p of tailnet.peers) if (p.online) bases.add(`https://${p.dns}/`);
-      for (const b of settings?.servers ?? []) bases.add(b);
-      if (host.url) bases.add(baseOf(host.url));
-      const found = await invoke<{ base: string; version: string }[]>("discover", { bases: [...bases] });
+      const report = new Set<string>(settings?.servers ?? []);
+      if (host.url) report.add(baseOf(host.url));
+      for (const b of report) bases.add(b);
+      const found = await invoke<{ base: string; version: string; error: string | null }[]>("discover", {
+        bases: [...bases],
+        report: [...report],
+      });
       const servers: Server[] = await Promise.all(
         found.map(async (f) => {
+          if (f.error) return { base: f.base, version: "", error: `Can't reach this server: ${f.error}` };
           try {
-            return { ...f, me: await get<Me>(f.base, "/api/me") };
+            return { base: f.base, version: f.version, me: await get<Me>(f.base, "/api/me") };
           } catch (e) {
-            return { ...f, error: String((e as Error).message ?? e) };
+            return { base: f.base, version: f.version, error: String((e as Error).message ?? e) };
           }
         }),
       );
