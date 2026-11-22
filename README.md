@@ -180,16 +180,22 @@ and permissions can be mixed in a list.
 
 ## Files on disk
 
-Each shared folder gets a hidden `.tailshare/` folder (subfolders don't) holding:
+Nothing is written into shared folders. Each one gets a data folder in the
+state directory, `shares/<id>/`, holding:
 
 - unfinished uploads
 - trash, kept 30 days and restorable from the admin Trash page
 - `owners.json`, who uploaded what
-- cached thumbnails, remade after 60 days (not cached on read-only shares)
+- cached thumbnails, remade after 60 days
 
-When a share is removed or moved, the old folder's `.tailshare/` is deleted,
-trash included (the app warns first). The shared files themselves are never
-touched.
+When a share is removed or moved, its data folder is deleted, trash included
+(the app warns first). The shared files themselves are never touched.
+
+Uploads and trash move by rename when the share is on the same disk as the
+state directory. Otherwise they are copied, so that disk needs room for
+unfinished uploads and for anything in the trash; a delete that wouldn't fit
+is refused. Shares from older versions have their `.tailshare/` folder moved
+out on start.
 
 The state directory holds the Tailscale node identity, `config.json` and
 `activity.log` (append-only, one JSON object per line).

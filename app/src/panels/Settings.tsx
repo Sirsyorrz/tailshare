@@ -8,6 +8,7 @@ export function Settings() {
   const isOpen = useStore((s) => s.showSettings);
   const settings = useStore((s) => s.settings);
   const [server, setServer] = useState("");
+  const [root, setRoot] = useState("");
   const [error, setError] = useState("");
   const close = () => useStore.getState().setShowSettings(false);
 
@@ -22,9 +23,25 @@ export function Settings() {
     }
   };
 
-  const addRoot = async () => {
+  const addRoot = (dir: string) => {
+    if (dir && !settings.roots.includes(dir)) void save({ ...settings, roots: [...settings.roots, dir] });
+  };
+
+  const pickRoot = async () => {
     const dir = await open({ directory: true, title: "Folder shares may be created in" });
-    if (typeof dir === "string" && !settings.roots.includes(dir)) void save({ ...settings, roots: [...settings.roots, dir] });
+    if (typeof dir === "string") addRoot(dir);
+  };
+
+  // Typed, since some folder dialogs won't pick a drive's top (like "/").
+  const addTypedRoot = () => {
+    const dir = root.trim();
+    if (!dir) return;
+    if (!/^(\/|[a-zA-Z]:[\\/]|\\\\)/.test(dir)) {
+      setError("Type a full path, like / or C:\\");
+      return;
+    }
+    addRoot(dir);
+    setRoot("");
   };
 
   const addServer = () => {
@@ -70,8 +87,18 @@ export function Settings() {
                   </li>
                 ))}
               </ul>
+              <div className="row">
+                <input
+                  className="grow"
+                  placeholder="/ or a full path"
+                  value={root}
+                  onChange={(e) => setRoot(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addTypedRoot()}
+                />
+                <button onClick={addTypedRoot}>Add</button>
+              </div>
             </div>
-            <button onClick={() => void addRoot()}>Add</button>
+            <button onClick={() => void pickRoot()}>Browse</button>
           </div>
 
           <div className="sidebar-h">Servers</div>

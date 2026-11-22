@@ -16,7 +16,7 @@ import (
 	"github.com/Sirsyorrz/tailshare/server/internal/thumb"
 )
 
-const thumbsDir = metaDir + "/thumbs"
+const thumbsDir = "thumbs"
 
 var ErrNoPreview = errors.New("no preview")
 
@@ -77,34 +77,8 @@ func (s *Share) realPath(rel string) (string, error) {
 	return p, nil
 }
 
-// CacheThumbsIn keeps a read-only share's previews in dir, outside the
-// shared folder. Without it they'd be remade on every visit, running
-// ffmpeg over the same footage again and again.
-func (s *Share) CacheThumbsIn(dir string) error {
-	if s.writable {
-		return nil
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	r, err := os.OpenRoot(dir)
-	if err != nil {
-		return err
-	}
-	s.thumbCache = r
-	return nil
-}
-
 // thumbStore is where previews are cached, or nil for nowhere.
-func (s *Share) thumbStore() (*os.Root, string) {
-	if s.writable {
-		return s.root, thumbsDir
-	}
-	if s.thumbCache != nil {
-		return s.thumbCache, "thumbs"
-	}
-	return nil, ""
-}
+func (s *Share) thumbStore() (*os.Root, string) { return s.data, thumbsDir }
 
 func readFile(r *os.Root, p string) ([]byte, error) {
 	if r == nil {

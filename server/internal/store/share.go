@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"sort"
 	"sync"
@@ -20,19 +21,20 @@ var (
 )
 
 const (
-	uploadsDir = metaDir + "/uploads"
-	trashDir   = metaDir + "/trash"
+	uploadsDir = "uploads"
+	trashDir   = "trash"
 )
 
 // Share is one shared folder. Every filesystem call goes through root, which
 // the OS confines to the folder (no "..", no symlinks pointing outside).
 type Share struct {
-	Name     string
-	dir      string
-	root     *os.Root
+	Name string
+	dir  string
+	root *os.Root
+	// data holds unfinished uploads, trash, owners and previews, outside the
+	// shared folder so sharing a folder leaves nothing in it.
+	data     *os.Root
 	writable bool
-	// thumbCache holds previews for a read-only share; nil otherwise.
-	thumbCache *os.Root
 
 	mu      sync.Mutex
 	uploads map[string]*upload
@@ -47,20 +49,29 @@ type Entry struct {
 	Owner    int64     `json:"-"`
 }
 
-func Open(name, dir string, writable bool) (*Share, error) {
+// Open shares the folder dir, keeping its tailshare data in dataDir.
+func Open(name, dir, dataDir string, writable bool) (*Share, error) {
 	r, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
-	s := &Share{Name: name, dir: dir, root: r, writable: writable, uploads: map[string]*upload{}, owners: map[string]Owner{}}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		r.Close()
+		return nil, fmt.Errorf("share %s: %w", name, err)
+	}
+	d, err := os.OpenRoot(dataDir)
+	if err != nil {
+		r.Close()
+		return nil, fmt.Errorf("share %s: %w", name, err)
+	}
+	s := &Share{Name: name, dir: dir, root: r, data: d, writable: writable, uploads: map[string]*upload{}, owners: map[string]Owner{}}
 	if writable {
-		if err := r.MkdirAll(uploadsDir, 0o700); err != nil {
-			r.Close()
-			return nil, fmt.Errorf("share %s: %w", name, err)
-		}
-		if err := r.MkdirAll(trashDir, 0o700); err != nil {
-			r.Close()
-			return nil, fmt.Errorf("share %s: %w", name, err)
+		s.adoptLegacy()
+		for _, sub := range []string{uploadsDir, trashDir} {
+			if err := d.MkdirAll(sub, 0o700); err != nil {
+				s.Close()
+				return nil, fmt.Errorf("share %s: %w", name, err)
+			}
 		}
 		s.loadUploads()
 		s.loadOwners()
@@ -68,28 +79,64 @@ func Open(name, dir string, writable bool) (*Share, error) {
 	return s, nil
 }
 
-func (s *Share) Close() error {
-	if s.thumbCache != nil {
-		s.thumbCache.Close()
+// adoptLegacy moves what older versions kept in the share's own .tailshare
+// folder into the data folder, then removes it. Previews are just dropped.
+func (s *Share) adoptLegacy() {
+	if st, err := s.root.Lstat(metaDir); err != nil || !st.IsDir() {
+		return
 	}
+	left := false
+	for _, name := range []string{uploadsDir, trashDir, ownersFile} {
+		src := metaDir + "/" + name
+		if _, err := s.root.Lstat(src); err != nil {
+			continue
+		}
+		if _, err := s.data.Lstat(name); err == nil {
+			left = true
+			continue
+		}
+		if err := moveAcross(s.root, src, s.data, name); err != nil {
+			log.Printf("share %s: moving old %s out of the folder: %v", s.Name, src, err)
+			left = true
+		}
+	}
+	if left {
+		log.Printf("share %s: left %s in %s, it couldn't all be moved", s.Name, metaDir, s.dir)
+		return
+	}
+	if err := s.root.RemoveAll(metaDir); err != nil {
+		log.Printf("share %s: removing old %s: %v", s.Name, metaDir, err)
+		return
+	}
+	log.Printf("share %s: moved its data out of %s", s.Name, s.dir)
+}
+
+func (s *Share) Close() error {
+	s.data.Close()
 	return s.root.Close()
 }
 
 func (s *Share) Dir() string { return s.dir }
 
-// RemoveMeta deletes a folder's .tailshare (unfinished uploads, trash,
-// owners, thumbnails) once it no longer backs any share. Scoped to the
-// folder, so a planted symlink can't point the removal elsewhere.
-func RemoveMeta(dir string) error {
-	r, err := os.OpenRoot(dir)
+func (s *Share) DataDir() string { return s.data.Name() }
+
+// FreeBytes is the space uploads can use. Unfinished ones are kept in the
+// data folder, which may be on another disk, so both must have room.
+func (s *Share) FreeBytes() (int64, error) {
+	free, err := freeBytes(s.dir)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return err
+		return 0, err
 	}
-	defer r.Close()
-	return r.RemoveAll(metaDir)
+	if d, err := freeBytes(s.data.Name()); err == nil {
+		free = min(free, d)
+	}
+	return free, nil
+}
+
+// RemoveData deletes a share's data folder (unfinished uploads, trash,
+// owners, previews) once it no longer backs any share.
+func RemoveData(dataDir string) error {
+	return os.RemoveAll(dataDir)
 }
 
 // mapErr hides OS detail (including "path escapes from parent", which is

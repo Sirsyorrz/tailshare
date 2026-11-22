@@ -8,9 +8,8 @@ import (
 	"unicode/utf8"
 )
 
-// metaDir lives at the top of every share so uploads and trash stay on the
-// same filesystem as their destination (renames are atomic, no multi-GB
-// copies). Clients can never address it.
+// metaDir is where older versions kept a share's data, at the top of the
+// shared folder. Open moves it out; until then clients can never address it.
 const metaDir = ".tailshare"
 
 var (

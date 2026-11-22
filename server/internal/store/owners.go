@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const ownersFile = metaDir + "/owners.json"
+const ownersFile = "owners.json"
 
 // Owner records who put a file or folder into the share through tailshare.
 // Files the host copies in directly have no owner.
@@ -18,7 +18,7 @@ type Owner struct {
 
 func (s *Share) loadOwners() {
 	s.owners = map[string]Owner{}
-	b, err := s.root.ReadFile(ownersFile)
+	b, err := s.data.ReadFile(ownersFile)
 	if err != nil {
 		return
 	}
@@ -33,11 +33,11 @@ func (s *Share) loadOwners() {
 func (s *Share) saveOwnersLocked() {
 	b, _ := json.Marshal(s.owners)
 	tmp := ownersFile + ".tmp"
-	if err := s.root.WriteFile(tmp, b, 0o600); err != nil {
+	if err := s.data.WriteFile(tmp, b, 0o600); err != nil {
 		log.Printf("share %s: saving owners: %v", s.Name, err)
 		return
 	}
-	if err := s.root.Rename(tmp, ownersFile); err != nil {
+	if err := s.data.Rename(tmp, ownersFile); err != nil {
 		log.Printf("share %s: saving owners: %v", s.Name, err)
 	}
 }

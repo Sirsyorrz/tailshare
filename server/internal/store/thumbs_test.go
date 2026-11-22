@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestReadOnlyThumbsCachedOutsideShare(t *testing.T) {
+func TestThumbsCachedOutsideShare(t *testing.T) {
 	dir, cache := t.TempDir(), t.TempDir()
 	f, err := os.Create(filepath.Join(dir, "a.png"))
 	if err != nil {
@@ -18,14 +18,11 @@ func TestReadOnlyThumbsCachedOutsideShare(t *testing.T) {
 	png.Encode(f, image.NewRGBA(image.Rect(0, 0, 8, 8)))
 	f.Close()
 
-	s, err := Open("t", dir, false)
+	s, err := Open("t", dir, cache, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if err := s.CacheThumbsIn(cache); err != nil {
-		t.Fatal(err)
-	}
 	if _, _, err := s.Thumbnail(context.Background(), "a.png", 320); err != nil {
 		t.Fatal(err)
 	}

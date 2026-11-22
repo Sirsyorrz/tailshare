@@ -41,7 +41,7 @@ func TestValidName(t *testing.T) {
 func newShare(t *testing.T) (*Share, string) {
 	t.Helper()
 	dir := t.TempDir()
-	s, err := Open("t", dir, true)
+	s, err := Open("t", dir, t.TempDir(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,13 +82,16 @@ func TestUploadNoReplaceNumbers(t *testing.T) {
 	if string(b) != "first" {
 		t.Fatalf("original overwritten: %q", b)
 	}
-	if left, _ := os.ReadDir(filepath.Join(dir, uploadsDir)); len(left) != 0 {
+	if left, _ := os.ReadDir(filepath.Join(s.DataDir(), uploadsDir)); len(left) != 0 {
 		t.Fatalf("upload leftovers: %d", len(left))
 	}
 }
 
 func TestUploadReplaceTrashesOld(t *testing.T) {
 	s, dir := newShare(t)
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("share folder written to: %v", entries)
+	}
 	doUpload(t, s, 1, "a.txt", "old", false)
 	if got := doUpload(t, s, 1, "a.txt", "new", true); got != "a.txt" {
 		t.Fatalf("got %q", got)
@@ -97,7 +100,7 @@ func TestUploadReplaceTrashesOld(t *testing.T) {
 	if string(b) != "new" {
 		t.Fatalf("got %q", b)
 	}
-	matches, _ := filepath.Glob(filepath.Join(dir, trashDir, "*", "a.txt"))
+	matches, _ := filepath.Glob(filepath.Join(s.DataDir(), trashDir, "*", "a.txt"))
 	if len(matches) != 1 {
 		t.Fatalf("old file not in trash: %v", matches)
 	}
@@ -127,13 +130,13 @@ func TestUploadGuards(t *testing.T) {
 }
 
 func TestUploadsSurviveRestart(t *testing.T) {
-	dir := t.TempDir()
-	s, _ := Open("t", dir, true)
+	dir, data := t.TempDir(), t.TempDir()
+	s, _ := Open("t", dir, data, true)
 	u, _ := s.CreateUpload(1, "", "f.bin", 4)
 	s.WriteChunk(u.ID, 1, 0, strings.NewReader("ab"))
 	s.Close()
 
-	s2, _ := Open("t", dir, true)
+	s2, _ := Open("t", dir, data, true)
 	defer s2.Close()
 	st, err := s2.UploadStatus(u.ID, 1)
 	if err != nil || st.Offset != 2 {

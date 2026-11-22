@@ -45,9 +45,9 @@ type Options struct {
 	// RootsFile lists more roots, one per line, re-read on use.
 	RootsFile string
 	Version   string
-	// ThumbCache is where read-only shares cache previews. Empty means
-	// they don't.
-	ThumbCache string
+	// DataDir holds each share's unfinished uploads, trash, owners and
+	// previews, one folder per shared folder.
+	DataDir string
 }
 
 type Server struct {
@@ -117,16 +117,14 @@ func (s *Server) isHost(h string) bool {
 func (s *Server) Load(cfg *config.Config) {
 	next := map[string]*store.Share{}
 	for _, sc := range cfg.Shares {
-		sh, err := store.Open(sc.Name, sc.Path, !sc.ReadOnly)
+		if s.opt.DataDir == "" {
+			log.Printf("share %q disabled: no data folder set", sc.Name)
+			continue
+		}
+		sh, err := store.Open(sc.Name, sc.Path, s.dataDir(sc.Path), !sc.ReadOnly)
 		if err != nil {
 			log.Printf("share %q (%s) disabled: %v", sc.Name, sc.Path, err)
 			continue
-		}
-		if sc.ReadOnly && s.opt.ThumbCache != "" {
-			sum := sha256.Sum256([]byte(sameDir(sc.Path)))
-			if err := sh.CacheThumbsIn(filepath.Join(s.opt.ThumbCache, hex.EncodeToString(sum[:8]))); err != nil {
-				log.Printf("share %q: no preview cache: %v", sc.Name, err)
-			}
 		}
 		next[sc.Name] = sh
 	}
@@ -144,15 +142,22 @@ func (s *Server) Load(cfg *config.Config) {
 		// leaves its folder alone, since we can't tell it apart from one
 		// that's merely offline.
 		if !inUse[sameDir(sh.Dir())] {
-			if err := store.RemoveMeta(sh.Dir()); err != nil {
-				log.Printf("cleaning up %s: %v", sh.Dir(), err)
+			if err := store.RemoveData(sh.DataDir()); err != nil {
+				log.Printf("cleaning up data for %s: %v", sh.Dir(), err)
 			} else {
-				log.Printf("removed tailshare data from %s (no longer shared)", sh.Dir())
+				log.Printf("removed tailshare data for %s (no longer shared)", sh.Dir())
 			}
 		}
 	}
 	s.changes.bump(true)
 	log.Printf("loaded %d share(s)", len(next))
+}
+
+// dataDir is keyed by the folder, not the share name, so renaming a share
+// keeps its trash.
+func (s *Server) dataDir(folder string) string {
+	sum := sha256.Sum256([]byte(sameDir(folder)))
+	return filepath.Join(s.opt.DataDir, hex.EncodeToString(sum[:8]))
 }
 
 // Close releases every share's folder. Windows can't delete or rename a
@@ -351,6 +356,8 @@ func storeError(w http.ResponseWriter, err error) {
 		httpError(w, http.StatusConflict, "already exists")
 	case errors.Is(err, store.ErrIncomplete):
 		httpError(w, http.StatusConflict, "upload incomplete")
+	case errors.Is(err, store.ErrNoRoom):
+		httpError(w, http.StatusInsufficientStorage, "not enough free space to keep it in the trash")
 	case errors.Is(err, store.ErrTooLarge):
 		httpError(w, http.StatusRequestEntityTooLarge, "more data than declared")
 	case errors.Is(err, store.ErrBadName):

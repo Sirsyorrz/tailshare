@@ -25,6 +25,9 @@ const host = "tailshare.example.ts.net"
 // Windows won't delete a folder that's still open.
 func newServer(t *testing.T, o Options) *Server {
 	t.Helper()
+	if o.DataDir == "" {
+		o.DataDir = t.TempDir()
+	}
 	s := New(o)
 	t.Cleanup(s.Close)
 	return s

@@ -141,7 +141,9 @@ func main() {
 		fatal(err)
 	}
 	srv.Configure(*cfgPath, splitRoots(*rootsFlag), *rootsFile)
-	srv.CacheThumbsIn(filepath.Join(*stateDir, "thumbs"))
+	srv.KeepDataIn(filepath.Join(*stateDir, "shares"))
+	// Where older versions cached read-only shares' previews.
+	os.RemoveAll(filepath.Join(*stateDir, "thumbs"))
 	srv.Load(cfg)
 	go srv.Housekeep(ctx)
 	go srv.WatchReach(ctx)

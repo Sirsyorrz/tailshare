@@ -54,28 +54,20 @@ func (s *Share) toTrash(rel, by string) error {
 	}
 	size := st.Size()
 	if st.IsDir() {
-		size = 0
-		fs.WalkDir(s.root.FS(), rel, func(_ string, d fs.DirEntry, err error) error {
-			if err == nil && d.Type().IsRegular() {
-				if info, err := d.Info(); err == nil {
-					size += info.Size()
-				}
-			}
-			return nil
-		})
+		size = treeSize(s.root, rel)
 	}
 	id := strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + randID(4)
 	slot := trashDir + "/" + id
-	if err := s.root.Mkdir(slot, 0o700); err != nil {
+	if err := s.data.Mkdir(slot, 0o700); err != nil {
 		return mapErr(err)
 	}
-	if err := s.root.Rename(rel, slot+"/"+path.Base(rel)); err != nil {
-		s.root.Remove(slot)
+	if err := moveAcross(s.root, rel, s.data, slot+"/"+path.Base(rel)); err != nil {
+		s.data.Remove(slot)
 		return mapErr(err)
 	}
 	rec := trashRecord{Path: rel, By: by, At: time.Now(), Dir: st.IsDir(), Size: size, Owners: s.takeOwners(rel)}
 	b, _ := json.Marshal(rec)
-	return s.root.WriteFile(slot+".json", b, 0o600)
+	return s.data.WriteFile(slot+".json", b, 0o600)
 }
 
 func (s *Share) readTrash(id string) (trashRecord, error) {
@@ -83,7 +75,7 @@ func (s *Share) readTrash(id string) (trashRecord, error) {
 	if !trashID.MatchString(id) {
 		return rec, ErrNotFound
 	}
-	b, err := s.root.ReadFile(trashDir + "/" + id + ".json")
+	b, err := s.data.ReadFile(trashDir + "/" + id + ".json")
 	if err != nil {
 		return rec, mapErr(err)
 	}
@@ -94,7 +86,7 @@ func (s *Share) readTrash(id string) (trashRecord, error) {
 }
 
 func (s *Share) ListTrash() ([]TrashItem, error) {
-	des, err := fs.ReadDir(s.root.FS(), trashDir)
+	des, err := fs.ReadDir(s.data.FS(), trashDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return []TrashItem{}, nil
@@ -143,12 +135,12 @@ func (s *Share) RestoreTrash(id string) (string, error) {
 		}
 		target = join(parent, numbered(base, n))
 	}
-	if err := s.root.Rename(src, target); err != nil {
+	if err := moveAcross(s.data, src, s.root, target); err != nil {
 		return "", mapErr(err)
 	}
 	s.putOwners(rec.Owners, rec.Path, target)
-	s.root.Remove(slot)
-	s.root.Remove(slot + ".json")
+	s.data.Remove(slot)
+	s.data.Remove(slot + ".json")
 	return target, nil
 }
 
@@ -157,10 +149,10 @@ func (s *Share) DeleteTrash(id string) error {
 		return err
 	}
 	slot := trashDir + "/" + id
-	if err := s.root.RemoveAll(slot); err != nil {
+	if err := s.data.RemoveAll(slot); err != nil {
 		return mapErr(err)
 	}
-	return mapErr(s.root.Remove(slot + ".json"))
+	return mapErr(s.data.Remove(slot + ".json"))
 }
 
 // PurgeTrash permanently removes trash entries older than maxAge.

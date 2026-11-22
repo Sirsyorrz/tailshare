@@ -197,8 +197,8 @@ export function Shares({ base, myKeys }: { base: string; myKeys: string[] }) {
   const shareState = (name: string) => data.status.shares.find((s) => s.name === name);
   // By folder, so it still finds the share while it's being renamed.
   const trashIn = (path: string) => data.status.shares.find((s) => s.path === path)?.trashCount ?? 0;
-  // The server deletes a folder's .tailshare (trash, unfinished uploads)
-  // once no share uses it.
+  // The server deletes a folder's data (trash, unfinished uploads) once no
+  // share uses it.
   const leaveWarning = (path: string) => {
     const n = trashIn(path);
     return n > 0

@@ -43,7 +43,7 @@ func partPath(id string) string { return uploadsDir + "/" + id + ".part" }
 func metaPath(id string) string { return uploadsDir + "/" + id + ".json" }
 
 func (s *Share) loadUploads() {
-	des, err := fs.ReadDir(s.root.FS(), uploadsDir)
+	des, err := fs.ReadDir(s.data.FS(), uploadsDir)
 	if err != nil {
 		return
 	}
@@ -52,7 +52,7 @@ func (s *Share) loadUploads() {
 		if !ok {
 			continue
 		}
-		b, err := s.root.ReadFile(metaPath(id))
+		b, err := s.data.ReadFile(metaPath(id))
 		if err != nil {
 			continue
 		}
@@ -79,14 +79,14 @@ func (s *Share) CreateUpload(owner int64, dir, name string, size int64) (UploadI
 		return UploadInfo{}, err
 	}
 	u := &upload{ID: randID(16), Dir: rel, Name: name, Size: size, Owner: owner, Created: time.Now()}
-	f, err := s.root.OpenFile(partPath(u.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
+	f, err := s.data.OpenFile(partPath(u.ID), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o664)
 	if err != nil {
 		return UploadInfo{}, mapErr(err)
 	}
 	f.Close()
 	meta, _ := json.Marshal(u)
-	if err := s.root.WriteFile(metaPath(u.ID), meta, 0o600); err != nil {
-		s.root.Remove(partPath(u.ID))
+	if err := s.data.WriteFile(metaPath(u.ID), meta, 0o600); err != nil {
+		s.data.Remove(partPath(u.ID))
 		return UploadInfo{}, mapErr(err)
 	}
 	s.mu.Lock()
@@ -108,7 +108,7 @@ func (s *Share) get(id string, owner int64) (*upload, error) {
 }
 
 func (s *Share) offset(u *upload) (int64, error) {
-	st, err := s.root.Stat(partPath(u.ID))
+	st, err := s.data.Stat(partPath(u.ID))
 	if err != nil {
 		return 0, mapErr(err)
 	}
@@ -142,7 +142,7 @@ func (s *Share) WriteChunk(id string, owner int64, offset int64, r io.Reader) (i
 	if offset != cur {
 		return cur, ErrOffset
 	}
-	f, err := s.root.OpenFile(partPath(u.ID), os.O_WRONLY, 0)
+	f, err := s.data.OpenFile(partPath(u.ID), os.O_WRONLY, 0)
 	if err != nil {
 		return cur, mapErr(err)
 	}
@@ -221,22 +221,29 @@ func (s *Share) complete(id string, owner int64, replace, exact bool, by string)
 	return name, nil
 }
 
-// placeNoReplace uses a hard link because link(2) fails if the target exists,
+// placeNoReplace moves an upload's part file from the data folder into the
+// share. A hard link is used because link(2) fails if the target exists,
 // unlike rename(2), making the no-overwrite rule atomic.
 func (s *Share) placeNoReplace(part, target string) error {
-	err := s.root.Link(part, target)
-	if err == nil {
-		s.root.Remove(part)
+	err := linkAcross(s.data, part, s.root, target)
+	switch {
+	case err == nil:
+		s.data.Remove(part)
 		return nil
-	}
-	if errors.Is(err, fs.ErrExist) {
+	case errors.Is(err, fs.ErrExist):
 		return ErrExists
+	case crossDevice(err):
+		if err := copyFile(s.data, part, s.root, target); err != nil {
+			return mapErr(err)
+		}
+		s.data.Remove(part)
+		return nil
 	}
 	// Filesystems without hard links: check then rename (racy, last resort).
 	if _, lerr := s.root.Lstat(target); lerr == nil {
 		return ErrExists
 	}
-	return mapErr(s.root.Rename(part, target))
+	return mapErr(renameAcross(s.data, part, s.root, target))
 }
 
 // Pending is how many bytes unfinished uploads still expect, in total and
@@ -250,7 +257,7 @@ func (s *Share) Pending(user int64) (all, mine int64) {
 	s.mu.Unlock()
 	for _, u := range ups {
 		left := u.Size
-		if st, err := s.root.Stat(partPath(u.ID)); err == nil {
+		if st, err := s.data.Stat(partPath(u.ID)); err == nil {
 			left -= st.Size()
 		}
 		all += left
@@ -268,13 +275,13 @@ func (s *Share) CancelUpload(id string, owner int64) error {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	s.root.Remove(partPath(u.ID))
+	s.data.Remove(partPath(u.ID))
 	s.forget(u.ID)
 	return nil
 }
 
 func (s *Share) forget(id string) {
-	s.root.Remove(metaPath(id))
+	s.data.Remove(metaPath(id))
 	s.mu.Lock()
 	delete(s.uploads, id)
 	s.mu.Unlock()
@@ -290,11 +297,11 @@ func (s *Share) PurgeUploads(maxAge time.Duration) {
 	}
 	s.mu.Unlock()
 	for _, id := range ids {
-		st, err := s.root.Stat(partPath(id))
+		st, err := s.data.Stat(partPath(id))
 		if err == nil && st.ModTime().After(cutoff) {
 			continue
 		}
-		s.root.Remove(partPath(id))
+		s.data.Remove(partPath(id))
 		s.forget(id)
 	}
 }

@@ -113,7 +113,9 @@ func TestDAVNeedsHeader(t *testing.T) {
 
 func TestDAVWrites(t *testing.T) {
 	dir, cfg := davSetup(t, map[string]perm.Set{"f@x": perm.Presets["editor"]})
-	h := serverAs(t, identity.User{ID: 2, Login: "f@x"}, cfg)
+	srv := newServer(t, Options{Resolver: identity.Fixed{User: identity.User{ID: 2, Login: "f@x"}}, Hosts: []string{host}, HTTPS: true})
+	srv.Load(cfg)
+	h, data := srv.Handler(), srv.dataDir(dir)
 
 	if w := dav(h, "MKCOL", "/dav/media/new/", "", nil); w.Code != 201 {
 		t.Fatalf("mkcol: %d %s", w.Code, w.Body)
@@ -149,7 +151,7 @@ func TestDAVWrites(t *testing.T) {
 		t.Errorf("after move %q", b)
 	}
 	// v1 and v2 went to the trash rather than being lost.
-	if ents, _ := os.ReadDir(filepath.Join(dir, ".tailshare", "trash")); len(ents) != 4 {
+	if ents, _ := os.ReadDir(filepath.Join(data, "trash")); len(ents) != 4 {
 		t.Errorf("trash has %d entries, want 2 items + 2 records", len(ents))
 	}
 	if w := dav(h, "MOVE", "/dav/media/new/f.txt", "", map[string]string{"Destination": "/dav/media/sub%20dir/a%20b.txt", "Overwrite": "F"}); w.Code != 412 {
@@ -178,7 +180,7 @@ func TestDAVWrites(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "cut.bin")); !os.IsNotExist(err) {
 		t.Error("partial file left in place")
 	}
-	if ents, _ := os.ReadDir(filepath.Join(dir, ".tailshare", "uploads")); len(ents) != 0 {
+	if ents, _ := os.ReadDir(filepath.Join(data, "uploads")); len(ents) != 0 {
 		t.Errorf("staging not cleaned: %d", len(ents))
 	}
 }
